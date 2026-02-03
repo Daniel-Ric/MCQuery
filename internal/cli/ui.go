@@ -235,22 +235,49 @@ func withSpinner(title string, message func(frame int) string, tick time.Duratio
 	defer ticker.Stop()
 
 	frame := 0
-	lastLen := 0
+	lastLines := 0
 	for {
 		select {
 		case res := <-resultCh:
-			if lastLen > 0 {
-				fmt.Print("\r", strings.Repeat(" ", lastLen), "\r")
+			if lastLines > 1 {
+				moveCursorUp(lastLines - 1)
+			}
+			for i := 0; i < lastLines; i++ {
+				clearLine()
+				if i < lastLines-1 {
+					fmt.Print("\n")
+				}
 			}
 			fmt.Println()
 			return res.result, res.err
 		case <-ticker.C:
-			line := fmt.Sprintf("%s %s", style(message(frame), colorDim), style(frames[frame], colorAccent))
-			if lastLen > 0 && len(line) < lastLen {
-				line += strings.Repeat(" ", lastLen-len(line))
+			parts := strings.Split(message(frame), "\n")
+			if len(parts) == 0 {
+				parts = []string{""}
 			}
-			fmt.Print("\r", line)
-			lastLen = len(line)
+			renderLines := len(parts)
+			if lastLines > renderLines {
+				renderLines = lastLines
+			}
+
+			if lastLines > 1 {
+				moveCursorUp(lastLines - 1)
+			}
+			for i := 0; i < renderLines; i++ {
+				clearLine()
+				if i < len(parts) {
+					line := style(parts[i], colorDim)
+					if i == len(parts)-1 {
+						line = fmt.Sprintf("%s %s", line, style(frames[frame], colorAccent))
+					}
+					fmt.Print(line)
+				}
+				if i < renderLines-1 {
+					fmt.Print("\n")
+				}
+			}
+
+			lastLines = len(parts)
 			frame = (frame + 1) % len(frames)
 		}
 	}
