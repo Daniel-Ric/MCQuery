@@ -3,17 +3,26 @@
 package cli
 
 import (
+	"errors"
+
 	"golang.org/x/sys/windows"
 )
 
 type terminalState struct {
-	mode uint32
+	handle windows.Handle
+	mode   uint32
 }
 
 func makeRaw(fd int) (*terminalState, error) {
-	handle := windows.Handle(fd)
+	handle, err := windows.GetStdHandle(windows.STD_INPUT_HANDLE)
+	if err != nil {
+		return nil, err
+	}
 	var original uint32
 	if err := windows.GetConsoleMode(handle, &original); err != nil {
+		if errors.Is(err, windows.ERROR_INVALID_HANDLE) {
+			return nil, nil
+		}
 		return nil, err
 	}
 
@@ -27,13 +36,12 @@ func makeRaw(fd int) (*terminalState, error) {
 		return nil, err
 	}
 
-	return &terminalState{mode: original}, nil
+	return &terminalState{handle: handle, mode: original}, nil
 }
 
 func restore(fd int, state *terminalState) {
 	if state == nil {
 		return
 	}
-	handle := windows.Handle(fd)
-	_ = windows.SetConsoleMode(handle, state.mode)
+	_ = windows.SetConsoleMode(state.handle, state.mode)
 }
