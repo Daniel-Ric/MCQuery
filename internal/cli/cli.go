@@ -10,11 +10,13 @@ import (
 	"unicode"
 
 	"UWP-TCP-Con/internal/ping"
+	"UWP-TCP-Con/internal/web"
 )
 
 type App struct {
 	inputTimeout  time.Duration
 	lookupTimeout time.Duration
+	linkServer    *web.LinkServer
 }
 
 func NewApp() *App {
@@ -397,7 +399,27 @@ func (a *App) executeLookup(config LookupConfig) error {
 		if lookupErr != nil {
 			return "", lookupErr
 		}
-		return formatLookupResult(result), nil
+		var links []web.LookupLinkURLs
+		if len(result.Matches) > 0 {
+			if a.linkServer != nil {
+				_ = a.linkServer.Close()
+			}
+			entries := make([]web.LookupLink, 0, len(result.Matches))
+			for _, match := range result.Matches {
+				entries = append(entries, web.LookupLink{
+					Name: match.Host,
+					Host: match.Host,
+					Port: config.Port,
+				})
+			}
+			server, serverErr := web.StartLookupLinkServer(entries, 15*time.Minute)
+			if serverErr != nil {
+				return "", serverErr
+			}
+			a.linkServer = server
+			links = server.Links()
+		}
+		return formatLookupResult(result, links), nil
 	})
 	if err != nil {
 		return err
@@ -462,7 +484,7 @@ func (a *App) askAgain() (bool, error) {
 	return index == 0, nil
 }
 
-func formatLookupResult(result ping.LookupResult) string {
+func formatLookupResult(result ping.LookupResult, links []web.LookupLinkURLs) string {
 	var builder strings.Builder
 	builder.WriteString("Summary\n")
 	builder.WriteString(fmt.Sprintf("• Checked combinations: %d/%d\n", result.Completed, result.Attempts))
@@ -479,6 +501,10 @@ func formatLookupResult(result ping.LookupResult) string {
 			builder.WriteString("\n")
 		}
 		builder.WriteString(fmt.Sprintf("Host: %s\n", match.Host))
+		if i < len(links) {
+			builder.WriteString(fmt.Sprintf("Add link (browser): %s\n", links[i].AddURL))
+			builder.WriteString(fmt.Sprintf("Join link (browser): %s\n", links[i].ConnectURL))
+		}
 		builder.WriteString(match.Result.String())
 		builder.WriteString("\n")
 	}
