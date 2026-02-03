@@ -1,37 +1,47 @@
+//go:build windows
+
 package cli
 
 import (
-	"syscall"
+	"errors"
+
+	"golang.org/x/sys/windows"
 )
 
 type terminalState struct {
-	mode uint32
+	handle windows.Handle
+	mode   uint32
 }
 
 func makeRaw(fd int) (*terminalState, error) {
-	handle := syscall.Handle(fd)
+	handle, err := windows.GetStdHandle(windows.STD_INPUT_HANDLE)
+	if err != nil {
+		return nil, err
+	}
 	var original uint32
-	if err := syscall.GetConsoleMode(handle, &original); err != nil {
+	if err := windows.GetConsoleMode(handle, &original); err != nil {
+		if errors.Is(err, windows.ERROR_INVALID_HANDLE) {
+			return nil, nil
+		}
 		return nil, err
 	}
 
 	raw := original
-	raw &^= syscall.ENABLE_ECHO_INPUT
-	raw &^= syscall.ENABLE_LINE_INPUT
-	raw &^= syscall.ENABLE_PROCESSED_INPUT
-	raw |= syscall.ENABLE_VIRTUAL_TERMINAL_INPUT
+	raw &^= windows.ENABLE_ECHO_INPUT
+	raw &^= windows.ENABLE_LINE_INPUT
+	raw &^= windows.ENABLE_PROCESSED_INPUT
+	raw |= windows.ENABLE_VIRTUAL_TERMINAL_INPUT
 
-	if err := syscall.SetConsoleMode(handle, raw); err != nil {
+	if err := windows.SetConsoleMode(handle, raw); err != nil {
 		return nil, err
 	}
 
-	return &terminalState{mode: original}, nil
+	return &terminalState{handle: handle, mode: original}, nil
 }
 
 func restore(fd int, state *terminalState) {
 	if state == nil {
 		return
 	}
-	handle := syscall.Handle(fd)
-	_ = syscall.SetConsoleMode(handle, state.mode)
+	_ = windows.SetConsoleMode(state.handle, state.mode)
 }
