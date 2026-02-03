@@ -213,7 +213,7 @@ func renderSpinnerPage(title, message, frame string) {
 	renderPage(title, []string{fmt.Sprintf("%s %s", style(message, colorDim), style(frame, colorAccent))})
 }
 
-func withSpinner(title, message string, tick time.Duration, action func() (string, error)) (string, error) {
+func withSpinner(title string, message func() string, tick time.Duration, action func() (string, error)) (string, error) {
 	resultCh := make(chan struct {
 		result string
 		err    error
@@ -245,7 +245,7 @@ func withSpinner(title, message string, tick time.Duration, action func() (strin
 			fmt.Println()
 			return res.result, res.err
 		case <-ticker.C:
-			line := fmt.Sprintf("%s %s", style(message, colorDim), style(frames[frame], colorAccent))
+			line := fmt.Sprintf("%s %s", style(message(), colorDim), style(frames[frame], colorAccent))
 			if lastLen > 0 && len(line) < lastLen {
 				line += strings.Repeat(" ", lastLen-len(line))
 			}

@@ -15,6 +15,7 @@ type LookupConfig struct {
 	Subdomains    []string
 	DomainEndings []string
 	Concurrency   int
+	Progress      func(subdomain, ending string)
 }
 
 type LookupMatch struct {
@@ -88,6 +89,9 @@ func LookupDomains(ctx context.Context, config LookupConfig) (LookupResult, erro
 		defer close(candidates)
 		for _, sub := range subdomains {
 			for _, ending := range endings {
+				if config.Progress != nil {
+					config.Progress(sub, ending)
+				}
 				select {
 				case <-ctx.Done():
 					return

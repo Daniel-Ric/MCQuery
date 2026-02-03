@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"UWP-TCP-Con/internal/ping"
@@ -291,7 +292,9 @@ func (a *App) executeDirect(config DirectConfig) error {
 	ctx, cancel := context.WithTimeout(context.Background(), a.inputTimeout)
 	defer cancel()
 
-	resultText, err := withSpinner("Abfrage", "Server wird abgefragt", 120*time.Millisecond, func() (string, error) {
+	resultText, err := withSpinner("Abfrage", func() string {
+		return "Server wird abgefragt"
+	}, 120*time.Millisecond, func() (string, error) {
 		result, err := ping.Execute(ctx, config.Edition, config.Host, config.Port)
 		if err != nil {
 			return "", err
@@ -309,7 +312,19 @@ func (a *App) executeDirect(config DirectConfig) error {
 func (a *App) executeLookup(config LookupConfig) error {
 	ctx := context.Background()
 
-	resultText, err := withSpinner("IP Lookup", "Domains werden überprüft", 120*time.Millisecond, func() (string, error) {
+	var current atomic.Value
+	current.Store("Domains werden überprüft")
+	formatProgress := func(subdomain, ending string) string {
+		sub := subdomain
+		if sub == "" {
+			sub = "(keine)"
+		}
+		return fmt.Sprintf("Subdomain: %s | Endung: %s", sub, ending)
+	}
+
+	resultText, err := withSpinner("IP Lookup", func() string {
+		return current.Load().(string)
+	}, 120*time.Millisecond, func() (string, error) {
 		result, lookupErr := ping.LookupDomains(ctx, ping.LookupConfig{
 			Edition:       config.Edition,
 			Port:          config.Port,
@@ -317,6 +332,9 @@ func (a *App) executeLookup(config LookupConfig) error {
 			Subdomains:    config.Subdomains,
 			DomainEndings: config.Endings,
 			Concurrency:   24,
+			Progress: func(subdomain, ending string) {
+				current.Store(formatProgress(subdomain, ending))
+			},
 		})
 		if lookupErr != nil {
 			return "", lookupErr
