@@ -75,13 +75,14 @@ func (a *App) askEdition() (ping.Edition, error) {
 }
 
 func (a *App) askHost() (string, error) {
+	var errMsg string
 	for {
-		value, err := promptInput("Server Host")
+		value, err := promptInput("Server Host", "z.B. play.example.com", errMsg)
 		if err != nil {
 			return "", err
 		}
 		if strings.TrimSpace(value) == "" {
-			fmt.Println("Host darf nicht leer sein")
+			errMsg = "Host darf nicht leer sein"
 			continue
 		}
 		return value, nil
@@ -90,8 +91,9 @@ func (a *App) askHost() (string, error) {
 
 func (a *App) askPort(edition ping.Edition) (int, error) {
 	defaultPort := ping.DefaultPort(edition)
+	var errMsg string
 	for {
-		value, err := promptInput(fmt.Sprintf("Port (%d)", defaultPort))
+		value, err := promptInput(fmt.Sprintf("Port (%d)", defaultPort), "Leer lassen für Standardport", errMsg)
 		if err != nil {
 			return 0, err
 		}
@@ -100,11 +102,11 @@ func (a *App) askPort(edition ping.Edition) (int, error) {
 		}
 		port, err := ping.ParsePort(value)
 		if err != nil {
-			fmt.Println(err)
+			errMsg = err.Error()
 			continue
 		}
 		if port == 0 {
-			fmt.Println("Port darf nicht leer sein")
+			errMsg = "Port darf nicht leer sein"
 			continue
 		}
 		return port, nil
@@ -115,14 +117,18 @@ func (a *App) execute(config Config) error {
 	ctx, cancel := context.WithTimeout(context.Background(), a.inputTimeout)
 	defer cancel()
 
-	result, err := ping.Execute(ctx, config.Edition, config.Host, config.Port)
+	resultText, err := withSpinner("Abfrage", "Server wird abgefragt", 120*time.Millisecond, func() (string, error) {
+		result, err := ping.Execute(ctx, config.Edition, config.Host, config.Port)
+		if err != nil {
+			return "", err
+		}
+		return result.String(), nil
+	})
 	if err != nil {
 		return err
 	}
 
-	fmt.Println()
-	fmt.Println(result.String())
-	fmt.Println()
+	renderTextPage("Ergebnis", resultText)
 	return nil
 }
 
