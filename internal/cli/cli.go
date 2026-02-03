@@ -389,7 +389,7 @@ func (a *App) executeLookup(config LookupConfig) error {
 			BaseHost:      config.BaseHost,
 			Subdomains:    config.Subdomains,
 			DomainEndings: config.Endings,
-			Concurrency:   24,
+			Concurrency:   0,
 			Progress: func(progress ping.LookupProgress) {
 				current.Store(progress)
 			},
@@ -418,7 +418,7 @@ func formatLookupProgress(progress ping.LookupProgress, frame int) string {
 	bar := buildProgressBar(progress.Completed, progress.Total, frame, 20)
 	percent := (float64(progress.Completed) / float64(progress.Total)) * 100
 	return fmt.Sprintf(
-		"%s %d/%d (%.0f%%) | Subdomain: %s | Endung: %s | Host: %s",
+		"%s %d/%d (%.0f%%)\nSubdomain: %-12s | Endung: %-10s | Host: %s",
 		bar,
 		progress.Completed,
 		progress.Total,
