@@ -355,7 +355,8 @@ func (a *App) executeDirect(config DirectConfig) error {
 	ctx, cancel := context.WithTimeout(context.Background(), a.inputTimeout)
 	defer cancel()
 
-	resultText, err := withSpinner("Abfrage", func() string {
+	resultText, err := withSpinner("Abfrage", func(frame int) string {
+		_ = frame
 		return "Server wird abgefragt"
 	}, 120*time.Millisecond, func() (string, error) {
 		result, err := ping.Execute(ctx, config.Edition, config.Host, config.Port)
@@ -376,17 +377,11 @@ func (a *App) executeLookup(config LookupConfig) error {
 	ctx := context.Background()
 
 	var current atomic.Value
-	current.Store("Domains werden überprüft")
-	formatProgress := func(subdomain, ending string) string {
-		sub := subdomain
-		if sub == "" {
-			sub = "(keine)"
-		}
-		return fmt.Sprintf("Subdomain: %s | Endung: %s", sub, ending)
-	}
+	current.Store(ping.LookupProgress{})
 
-	resultText, err := withSpinner("IP Lookup", func() string {
-		return current.Load().(string)
+	resultText, err := withSpinner("IP Lookup", func(frame int) string {
+		progress := current.Load().(ping.LookupProgress)
+		return formatLookupProgress(progress, frame)
 	}, 120*time.Millisecond, func() (string, error) {
 		result, lookupErr := ping.LookupDomains(ctx, ping.LookupConfig{
 			Edition:       config.Edition,
@@ -395,8 +390,8 @@ func (a *App) executeLookup(config LookupConfig) error {
 			Subdomains:    config.Subdomains,
 			DomainEndings: config.Endings,
 			Concurrency:   24,
-			Progress: func(subdomain, ending string) {
-				current.Store(formatProgress(subdomain, ending))
+			Progress: func(progress ping.LookupProgress) {
+				current.Store(progress)
 			},
 		})
 		if lookupErr != nil {
@@ -410,6 +405,53 @@ func (a *App) executeLookup(config LookupConfig) error {
 
 	renderTextPage("Ergebnis", resultText)
 	return nil
+}
+
+func formatLookupProgress(progress ping.LookupProgress, frame int) string {
+	if progress.Total == 0 {
+		return "Domains werden überprüft"
+	}
+	subdomain := progress.Subdomain
+	if subdomain == "" {
+		subdomain = "(keine)"
+	}
+	bar := buildProgressBar(progress.Completed, progress.Total, frame, 20)
+	percent := (float64(progress.Completed) / float64(progress.Total)) * 100
+	return fmt.Sprintf(
+		"%s %d/%d (%.0f%%) | Subdomain: %s | Endung: %s | Host: %s",
+		bar,
+		progress.Completed,
+		progress.Total,
+		percent,
+		subdomain,
+		progress.Ending,
+		progress.Host,
+	)
+}
+
+func buildProgressBar(completed, total, frame, width int) string {
+	if total <= 0 || width <= 0 {
+		return "[--------------------]"
+	}
+	if completed > total {
+		completed = total
+	}
+	filled := (completed * width) / total
+	if filled > width {
+		filled = width
+	}
+	bar := make([]rune, width)
+	for i := 0; i < width; i++ {
+		bar[i] = '░'
+	}
+	for i := 0; i < filled; i++ {
+		bar[i] = '█'
+	}
+	if completed < total && filled < width {
+		animation := []rune{'▏', '▎', '▍', '▌', '▋', '▊', '▉'}
+		bar[filled] = animation[frame%len(animation)]
+	}
+	return fmt.Sprintf("[%s]", string(bar))
 }
 
 func (a *App) askAgain() (bool, error) {
