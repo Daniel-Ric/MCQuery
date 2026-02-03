@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,51 +13,21 @@ import (
 
 func (a *App) manageSettings() error {
 	for {
-		index, err := selectOption("Settings", []string{"View settings", "Edit settings", "Reset settings", "Back"})
-		if err != nil {
-			return err
-		}
-		switch index {
-		case 0:
-			if err := a.viewSettings(); err != nil {
-				return err
-			}
-		case 1:
-			if err := a.editSettings(); err != nil {
-				return err
-			}
-		case 2:
-			a.settings = defaultSettings()
-			if err := saveSettings(a.settings); err != nil {
-				return err
-			}
-		default:
-			return nil
-		}
-	}
-}
-
-func (a *App) viewSettings() error {
-	renderTextPage("Settings", formatSettings(a.settings))
-	return waitForEnter()
-}
-
-func (a *App) editSettings() error {
-	for {
 		options := []string{
-			"Request timeout (seconds)",
-			"Retry count",
-			"Retry delay (ms)",
-			"Enable Java SRV",
-			"IP mode",
-			"Lookup concurrency",
-			"Lookup rate limit (req/s)",
-			"Verbose output",
-			"Save results",
-			"Results path",
+			fmt.Sprintf("Request timeout (seconds): %d", a.settings.RequestTimeoutSeconds),
+			fmt.Sprintf("Retry count: %d", a.settings.RetryCount),
+			fmt.Sprintf("Retry delay (ms): %d", a.settings.RetryDelayMillis),
+			fmt.Sprintf("Enable Java SRV: %t", a.settings.EnableSRV),
+			fmt.Sprintf("IP mode: %s", a.settings.IPMode),
+			fmt.Sprintf("Lookup concurrency: %d", a.settings.LookupConcurrency),
+			fmt.Sprintf("Lookup rate limit (req/s): %d", a.settings.LookupRateLimit),
+			fmt.Sprintf("Verbose output: %t", a.settings.Verbose),
+			fmt.Sprintf("Save results: %t", a.settings.SaveResults),
+			fmt.Sprintf("Results path: %s", a.settings.ResultsPath),
+			"Reset settings",
 			"Back",
 		}
-		index, err := selectOption("Edit settings", options)
+		index, err := selectOption("Settings", options)
 		if err != nil {
 			return err
 		}
@@ -126,6 +95,8 @@ func (a *App) editSettings() error {
 				value = defaultResultsPath()
 			}
 			a.settings.ResultsPath = value
+		case 10:
+			a.settings = defaultSettings()
 		default:
 			return nil
 		}
@@ -136,25 +107,6 @@ func (a *App) editSettings() error {
 			return err
 		}
 	}
-}
-
-func formatSettings(settings Settings) string {
-	path, _ := settingsPath()
-	lines := []string{
-		fmt.Sprintf("Config file: %s", path),
-		"",
-		fmt.Sprintf("Request timeout: %d seconds", settings.RequestTimeoutSeconds),
-		fmt.Sprintf("Retry count: %d", settings.RetryCount),
-		fmt.Sprintf("Retry delay: %d ms", settings.RetryDelayMillis),
-		fmt.Sprintf("Enable Java SRV: %t", settings.EnableSRV),
-		fmt.Sprintf("IP mode: %s", settings.IPMode),
-		fmt.Sprintf("Lookup concurrency: %d", settings.LookupConcurrency),
-		fmt.Sprintf("Lookup rate limit: %d req/s", settings.LookupRateLimit),
-		fmt.Sprintf("Verbose output: %t", settings.Verbose),
-		fmt.Sprintf("Save results: %t", settings.SaveResults),
-		fmt.Sprintf("Results path: %s", settings.ResultsPath),
-	}
-	return strings.Join(lines, "\n")
 }
 
 func askIntValue(label string, current int) (int, error) {
@@ -209,14 +161,6 @@ func askIPMode(current ping.IPMode) (ping.IPMode, error) {
 	default:
 		return ping.IPModeAuto, nil
 	}
-}
-
-func waitForEnter() error {
-	fmt.Println()
-	fmt.Print(style("Press Enter to return", colorDim))
-	reader := bufio.NewReader(os.Stdin)
-	_, err := reader.ReadString('\n')
-	return err
 }
 
 func ensureResultsPath(path string) (string, error) {

@@ -447,7 +447,12 @@ func (a *App) executeLookup(config LookupConfig) error {
 			a.linkServer = server
 			links = server.Links()
 		}
-		return formatLookupResult(result, links, a.settings.Verbose), nil
+		metrics := lookupMetrics{
+			BaseHost:   config.BaseHost,
+			Subdomains: countLookupSubdomains(config.Subdomains),
+			Endings:    countLookupEndings(config.Endings),
+		}
+		return formatLookupResult(result, links, metrics, a.settings.Verbose), nil
 	})
 	if err != nil {
 		return err
@@ -517,9 +522,43 @@ func (a *App) askAgain() (bool, error) {
 	return index == 0, nil
 }
 
-func formatLookupResult(result ping.LookupResult, links []web.LookupLinkURLs, verbose bool) string {
+type lookupMetrics struct {
+	BaseHost   string
+	Subdomains int
+	Endings    int
+}
+
+func countLookupSubdomains(values []string) int {
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(strings.ToLower(value))
+		if value == "" {
+			value = "(none)"
+		}
+		seen[value] = struct{}{}
+	}
+	return len(seen)
+}
+
+func countLookupEndings(values []string) int {
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(strings.ToLower(value))
+		value = strings.TrimPrefix(value, ".")
+		if value == "" {
+			continue
+		}
+		seen[value] = struct{}{}
+	}
+	return len(seen)
+}
+
+func formatLookupResult(result ping.LookupResult, links []web.LookupLinkURLs, metrics lookupMetrics, verbose bool) string {
 	var builder strings.Builder
 	builder.WriteString("Summary\n")
+	builder.WriteString(fmt.Sprintf("• Base host: %s\n", metrics.BaseHost))
+	builder.WriteString(fmt.Sprintf("• Subdomains: %d\n", metrics.Subdomains))
+	builder.WriteString(fmt.Sprintf("• Domain endings: %d\n", metrics.Endings))
 	builder.WriteString(fmt.Sprintf("• Checked combinations: %d/%d\n", result.Completed, result.Attempts))
 	builder.WriteString(fmt.Sprintf("• Matches: %d\n", len(result.Matches)))
 	builder.WriteString("\n")
