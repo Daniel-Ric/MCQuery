@@ -188,10 +188,6 @@ func askTextValue(label, current string) (string, error) {
 
 func askBoolValue(label string, current bool) (bool, error) {
 	options := []string{"Disabled", "Enabled"}
-	selected := 0
-	if current {
-		selected = 1
-	}
 	index, err := selectOption(label, options)
 	if err != nil {
 		return false, err
