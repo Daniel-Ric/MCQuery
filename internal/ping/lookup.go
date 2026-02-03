@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 type LookupConfig struct {
@@ -16,12 +17,15 @@ type LookupConfig struct {
 	Subdomains    []string
 	DomainEndings []string
 	Concurrency   int
+	RateLimit     int
+	Options       ExecuteOptions
 	Progress      func(progress LookupProgress)
 }
 
 type LookupMatch struct {
 	Host   string
 	Result Result
+	Detail ExecuteDetails
 }
 
 type LookupResult struct {
@@ -81,6 +85,17 @@ func LookupDomains(ctx context.Context, config LookupConfig) (LookupResult, erro
 	results := make(chan LookupMatch, concurrency)
 	var completed int64
 
+	var limiter <-chan time.Time
+	if config.RateLimit > 0 {
+		interval := time.Second / time.Duration(config.RateLimit)
+		if interval <= 0 {
+			interval = time.Second
+		}
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		limiter = ticker.C
+	}
+
 	var wg sync.WaitGroup
 	worker := func() {
 		defer wg.Done()
@@ -91,7 +106,16 @@ func LookupDomains(ctx context.Context, config LookupConfig) (LookupResult, erro
 			default:
 			}
 
-			res, err := Execute(ctx, config.Edition, candidate.host, config.Port)
+			res, detail, err := Execute(ctx, ExecuteConfig{
+				Edition:    config.Edition,
+				Host:       candidate.host,
+				Port:       config.Port,
+				Timeout:    config.Options.Timeout,
+				RetryCount: config.Options.RetryCount,
+				RetryDelay: config.Options.RetryDelay,
+				EnableSRV:  config.Options.EnableSRV,
+				IPMode:     config.Options.IPMode,
+			})
 			currentCompleted := int(atomic.AddInt64(&completed, 1))
 			if config.Progress != nil {
 				config.Progress(LookupProgress{
@@ -109,7 +133,7 @@ func LookupDomains(ctx context.Context, config LookupConfig) (LookupResult, erro
 			select {
 			case <-ctx.Done():
 				return
-			case results <- LookupMatch{Host: candidate.host, Result: res}:
+			case results <- LookupMatch{Host: candidate.host, Result: res, Detail: detail}:
 			}
 		}
 	}
@@ -129,6 +153,7 @@ func LookupDomains(ctx context.Context, config LookupConfig) (LookupResult, erro
 				select {
 				case <-ctx.Done():
 					return
+				case <-limiter:
 				case candidates <- lookupCandidate{
 					subdomain: sub,
 					ending:    ending,
