@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+	"unicode"
 
 	"UWP-TCP-Con/internal/ping"
 )
@@ -209,27 +210,46 @@ func (a *App) askBaseHost() (string, error) {
 }
 
 func (a *App) askSubdomainChoice() ([]string, error) {
-	index, err := selectOption("Subdomain", []string{"Eigene Subdomain", "Subdomain-Pool"})
+	index, err := selectOption("Subdomain", []string{"Eigene Subdomains", "Subdomain-Pool", "Eigene + Pool"})
 	if err != nil {
 		return nil, err
 	}
 	if index == 1 {
 		return subdomainPool, nil
 	}
+	if index == 2 {
+		custom, err := a.askCustomSubdomains()
+		if err != nil {
+			return nil, err
+		}
+		return append(custom, subdomainPool...), nil
+	}
 
+	return a.askCustomSubdomains()
+}
+
+func (a *App) askCustomSubdomains() ([]string, error) {
 	var errMsg string
 	for {
-		value, err := promptInput("Subdomain (optional)", "z.B. play (leer lassen für keine)", errMsg)
+		value, err := promptInput("Subdomains (optional, kommasepariert)", "z.B. play, mc (leer lassen für keine)", errMsg)
 		if err != nil {
 			return nil, err
 		}
 		value = strings.TrimSpace(value)
-		return []string{value}, nil
+		if value == "" {
+			return []string{""}, nil
+		}
+		list := splitList(value)
+		if len(list) == 0 {
+			errMsg = "Subdomain darf nicht leer sein"
+			continue
+		}
+		return list, nil
 	}
 }
 
 func (a *App) askDomainEndings() ([]string, error) {
-	index, err := selectOption("Domain-Endung", []string{"Eigene Endung", "Endungs-Pool"})
+	index, err := selectOption("Domain-Endung", []string{"Eigene Endungen", "Endungs-Pool", "Eigene + Pool"})
 	if err != nil {
 		return nil, err
 	}
@@ -240,19 +260,62 @@ func (a *App) askDomainEndings() ([]string, error) {
 		}
 		return endings, nil
 	}
+	custom, err := a.askCustomEndings()
+	if err != nil {
+		return nil, err
+	}
+	if index == 2 {
+		endings, err := loadDomainEndings()
+		if err != nil {
+			return append(custom, endings...), nil
+		}
+		return append(custom, endings...), nil
+	}
+	return custom, nil
+}
+
+func (a *App) askCustomEndings() ([]string, error) {
 	var errMsg string
 	for {
-		value, err := promptInput("Domain-Endung", "z.B. com oder de", errMsg)
+		value, err := promptInput("Domain-Endungen (kommasepariert)", "z.B. com, de", errMsg)
 		if err != nil {
 			return nil, err
 		}
-		value = normalizeEnding(value)
+		value = strings.TrimSpace(value)
 		if value == "" {
 			errMsg = "Endung darf nicht leer sein"
 			continue
 		}
-		return []string{value}, nil
+		rawList := splitList(value)
+		list := make([]string, 0, len(rawList))
+		for _, entry := range rawList {
+			normalized := normalizeEnding(entry)
+			if normalized == "" {
+				continue
+			}
+			list = append(list, normalized)
+		}
+		if len(list) == 0 {
+			errMsg = "Endung darf nicht leer sein"
+			continue
+		}
+		return list, nil
 	}
+}
+
+func splitList(value string) []string {
+	parts := strings.FieldsFunc(value, func(r rune) bool {
+		return r == ',' || unicode.IsSpace(r)
+	})
+	list := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		list = append(list, part)
+	}
+	return list
 }
 
 func (a *App) askPort(edition ping.Edition) (int, error) {
