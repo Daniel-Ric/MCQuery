@@ -15,7 +15,7 @@ type LookupConfig struct {
 	Subdomains    []string
 	DomainEndings []string
 	Concurrency   int
-	Progress      func(subdomain, ending string)
+	Progress      func(progress LookupProgress)
 }
 
 type LookupMatch struct {
@@ -26,6 +26,15 @@ type LookupMatch struct {
 type LookupResult struct {
 	Matches   []LookupMatch
 	Attempts  int
+	Completed int
+}
+
+type LookupProgress struct {
+	Subdomain string
+	Ending    string
+	Host      string
+	Attempt   int
+	Total     int
 	Completed int
 }
 
@@ -53,29 +62,46 @@ func LookupDomains(ctx context.Context, config LookupConfig) (LookupResult, erro
 		return LookupResult{}, fmt.Errorf("keine kombinationen verfügbar")
 	}
 
-	candidates := make(chan string, concurrency)
+	type lookupCandidate struct {
+		subdomain string
+		ending    string
+		host      string
+		attempt   int
+	}
+
+	candidates := make(chan lookupCandidate, concurrency)
 	results := make(chan LookupMatch, concurrency)
 	var completed int64
 
 	var wg sync.WaitGroup
 	worker := func() {
 		defer wg.Done()
-		for host := range candidates {
+		for candidate := range candidates {
 			select {
 			case <-ctx.Done():
 				return
 			default:
 			}
 
-			res, err := Execute(ctx, config.Edition, host, config.Port)
-			atomic.AddInt64(&completed, 1)
+			res, err := Execute(ctx, config.Edition, candidate.host, config.Port)
+			currentCompleted := int(atomic.AddInt64(&completed, 1))
+			if config.Progress != nil {
+				config.Progress(LookupProgress{
+					Subdomain: candidate.subdomain,
+					Ending:    candidate.ending,
+					Host:      candidate.host,
+					Attempt:   candidate.attempt,
+					Total:     total,
+					Completed: currentCompleted,
+				})
+			}
 			if err != nil {
 				continue
 			}
 			select {
 			case <-ctx.Done():
 				return
-			case results <- LookupMatch{Host: host, Result: res}:
+			case results <- LookupMatch{Host: candidate.host, Result: res}:
 			}
 		}
 	}
@@ -87,15 +113,20 @@ func LookupDomains(ctx context.Context, config LookupConfig) (LookupResult, erro
 
 	go func() {
 		defer close(candidates)
+		attempt := 0
 		for _, sub := range subdomains {
 			for _, ending := range endings {
-				if config.Progress != nil {
-					config.Progress(sub, ending)
-				}
+				attempt++
+				host := buildHost(sub, baseHost, ending)
 				select {
 				case <-ctx.Done():
 					return
-				case candidates <- buildHost(sub, baseHost, ending):
+				case candidates <- lookupCandidate{
+					subdomain: sub,
+					ending:    ending,
+					host:      host,
+					attempt:   attempt,
+				}:
 				}
 			}
 		}
