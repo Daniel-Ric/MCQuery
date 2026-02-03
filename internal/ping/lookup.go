@@ -6,17 +6,15 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 )
 
 type LookupConfig struct {
-	Edition        Edition
-	Port           int
-	BaseHost       string
-	Subdomains     []string
-	DomainEndings  []string
-	Concurrency    int
-	PerHostTimeout time.Duration
+	Edition       Edition
+	Port          int
+	BaseHost      string
+	Subdomains    []string
+	DomainEndings []string
+	Concurrency   int
 }
 
 type LookupMatch struct {
@@ -49,11 +47,6 @@ func LookupDomains(ctx context.Context, config LookupConfig) (LookupResult, erro
 	if concurrency <= 0 {
 		concurrency = 16
 	}
-	perHostTimeout := config.PerHostTimeout
-	if perHostTimeout <= 0 {
-		perHostTimeout = 2 * time.Second
-	}
-
 	total := len(subdomains) * len(endings)
 	if total == 0 {
 		return LookupResult{}, fmt.Errorf("keine kombinationen verfügbar")
@@ -73,9 +66,7 @@ func LookupDomains(ctx context.Context, config LookupConfig) (LookupResult, erro
 			default:
 			}
 
-			hostCtx, cancel := context.WithTimeout(ctx, perHostTimeout)
-			res, err := Execute(hostCtx, config.Edition, host, config.Port)
-			cancel()
+			res, err := Execute(ctx, config.Edition, host, config.Port)
 			atomic.AddInt64(&completed, 1)
 			if err != nil {
 				continue

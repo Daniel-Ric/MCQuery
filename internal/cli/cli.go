@@ -17,8 +17,7 @@ type App struct {
 
 func NewApp() *App {
 	return &App{
-		inputTimeout:  3 * time.Second,
-		lookupTimeout: 45 * time.Second,
+		inputTimeout: 3 * time.Second,
 	}
 }
 
@@ -308,23 +307,21 @@ func (a *App) executeDirect(config DirectConfig) error {
 }
 
 func (a *App) executeLookup(config LookupConfig) error {
-	ctx, cancel := context.WithTimeout(context.Background(), a.lookupTimeout)
-	defer cancel()
+	ctx := context.Background()
 
 	resultText, err := withSpinner("IP Lookup", "Domains werden überprüft", 120*time.Millisecond, func() (string, error) {
 		result, lookupErr := ping.LookupDomains(ctx, ping.LookupConfig{
-			Edition:        config.Edition,
-			Port:           config.Port,
-			BaseHost:       config.BaseHost,
-			Subdomains:     config.Subdomains,
-			DomainEndings:  config.Endings,
-			Concurrency:    24,
-			PerHostTimeout: 2 * time.Second,
+			Edition:       config.Edition,
+			Port:          config.Port,
+			BaseHost:      config.BaseHost,
+			Subdomains:    config.Subdomains,
+			DomainEndings: config.Endings,
+			Concurrency:   24,
 		})
-		if lookupErr != nil && !errors.Is(lookupErr, context.DeadlineExceeded) {
+		if lookupErr != nil {
 			return "", lookupErr
 		}
-		return formatLookupResult(result, errors.Is(lookupErr, context.DeadlineExceeded)), nil
+		return formatLookupResult(result), nil
 	})
 	if err != nil {
 		return err
@@ -342,13 +339,10 @@ func (a *App) askAgain() (bool, error) {
 	return index == 0, nil
 }
 
-func formatLookupResult(result ping.LookupResult, timedOut bool) string {
+func formatLookupResult(result ping.LookupResult) string {
 	var builder strings.Builder
 	builder.WriteString(fmt.Sprintf("Kombinationen geprüft: %d/%d\n", result.Completed, result.Attempts))
 	builder.WriteString(fmt.Sprintf("Treffer: %d\n", len(result.Matches)))
-	if timedOut {
-		builder.WriteString("Hinweis: Zeitlimit erreicht, Ergebnisse können unvollständig sein.\n")
-	}
 	builder.WriteString("\n")
 
 	if len(result.Matches) == 0 {
