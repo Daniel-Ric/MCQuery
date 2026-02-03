@@ -2,29 +2,9 @@ package ping
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"io"
-	"net"
 )
-
-func resolveToIPv4(ctx context.Context, host string) (string, error) {
-	ip := net.ParseIP(host)
-	if ip != nil && ip.To4() != nil {
-		return host, nil
-	}
-
-	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
-	if err != nil {
-		return "", err
-	}
-	for _, a := range addrs {
-		if a.IP.To4() != nil {
-			return a.IP.String(), nil
-		}
-	}
-	return "", fmt.Errorf("no IPv4 address found for %s", host)
-}
 
 func writePacket(w io.Writer, payload []byte) error {
 	header := &bytes.Buffer{}
