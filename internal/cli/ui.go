@@ -17,6 +17,8 @@ const (
 	colorBold   = "\033[1m"
 )
 
+var errAborted = errors.New("abgebrochen")
+
 func supportsColor() bool {
 	if os.Getenv("NO_COLOR") != "" {
 		return false
@@ -74,7 +76,7 @@ func selectOption(title string, options []string) (int, error) {
 
 		switch b {
 		case 3:
-			return 0, errors.New("abgebrochen")
+			return 0, errAborted
 		case 'w', 'k':
 			if selected > 0 {
 				selected--
