@@ -26,7 +26,7 @@ func Execute(ctx context.Context, edition Edition, host string, port int) (Resul
 		}
 		return pong, nil
 	default:
-		return nil, fmt.Errorf("unbekannte edition: %s", edition)
+		return nil, fmt.Errorf("unknown edition: %s", edition)
 	}
 }
 
@@ -44,10 +44,10 @@ func ParsePort(value string) (int, error) {
 	}
 	port, err := strconv.Atoi(trimmed)
 	if err != nil {
-		return 0, fmt.Errorf("ungültiger port")
+		return 0, fmt.Errorf("invalid port")
 	}
 	if port < 1 || port > 65535 {
-		return 0, fmt.Errorf("port außerhalb des bereichs 1-65535")
+		return 0, fmt.Errorf("port out of range (1-65535)")
 	}
 	return port, nil
 }

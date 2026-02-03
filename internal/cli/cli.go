@@ -157,7 +157,7 @@ func (a *App) collectLookupConfig() (LookupConfig, error) {
 }
 
 func (a *App) askMode() (Mode, error) {
-	index, err := selectOption("Startmodus", []string{"UWP/TCP Abfrage", "IP Lookup"})
+	index, err := selectOption("Start mode", []string{"UWP/TCP query", "IP lookup"})
 	if err != nil {
 		return "", err
 	}
@@ -181,12 +181,12 @@ func (a *App) askEdition() (ping.Edition, error) {
 func (a *App) askHost() (string, error) {
 	var errMsg string
 	for {
-		value, err := promptInput("Server Host", "z.B. play.example.com", errMsg)
+		value, err := promptInput("Server host", "e.g. play.example.com", errMsg)
 		if err != nil {
 			return "", err
 		}
 		if strings.TrimSpace(value) == "" {
-			errMsg = "Host darf nicht leer sein"
+			errMsg = "Host cannot be empty"
 			continue
 		}
 		return value, nil
@@ -196,13 +196,13 @@ func (a *App) askHost() (string, error) {
 func (a *App) askBaseHost() (string, error) {
 	var errMsg string
 	for {
-		value, err := promptInput("IP/Domain ohne Endung", "z.B. example", errMsg)
+		value, err := promptInput("IP/domain without ending", "e.g. example", errMsg)
 		if err != nil {
 			return "", err
 		}
 		value = strings.TrimSpace(value)
 		if value == "" {
-			errMsg = "Wert darf nicht leer sein"
+			errMsg = "Value cannot be empty"
 			continue
 		}
 		return value, nil
@@ -210,7 +210,7 @@ func (a *App) askBaseHost() (string, error) {
 }
 
 func (a *App) askSubdomainChoice() ([]string, error) {
-	index, err := selectOption("Subdomain", []string{"Eigene Subdomains", "Subdomain-Pool", "Eigene + Pool"})
+	index, err := selectOption("Subdomains", []string{"Custom subdomains", "Subdomain pool", "Custom + pool"})
 	if err != nil {
 		return nil, err
 	}
@@ -231,7 +231,7 @@ func (a *App) askSubdomainChoice() ([]string, error) {
 func (a *App) askCustomSubdomains() ([]string, error) {
 	var errMsg string
 	for {
-		value, err := promptInput("Subdomains (optional, kommasepariert)", "z.B. play, mc (leer lassen für keine)", errMsg)
+		value, err := promptInput("Subdomains (optional, comma-separated)", "e.g. play, mc (leave empty for none)", errMsg)
 		if err != nil {
 			return nil, err
 		}
@@ -241,7 +241,7 @@ func (a *App) askCustomSubdomains() ([]string, error) {
 		}
 		list := splitList(value)
 		if len(list) == 0 {
-			errMsg = "Subdomain darf nicht leer sein"
+			errMsg = "Subdomain cannot be empty"
 			continue
 		}
 		return list, nil
@@ -249,7 +249,7 @@ func (a *App) askCustomSubdomains() ([]string, error) {
 }
 
 func (a *App) askDomainEndings() ([]string, error) {
-	index, err := selectOption("Domain-Endung", []string{"Eigene Endungen", "Endungs-Pool", "Eigene + Pool"})
+	index, err := selectOption("Domain endings", []string{"Custom endings", "Ending pool", "Custom + pool"})
 	if err != nil {
 		return nil, err
 	}
@@ -277,13 +277,13 @@ func (a *App) askDomainEndings() ([]string, error) {
 func (a *App) askCustomEndings() ([]string, error) {
 	var errMsg string
 	for {
-		value, err := promptInput("Domain-Endungen (kommasepariert)", "z.B. com, de", errMsg)
+		value, err := promptInput("Domain endings (comma-separated)", "e.g. com, net", errMsg)
 		if err != nil {
 			return nil, err
 		}
 		value = strings.TrimSpace(value)
 		if value == "" {
-			errMsg = "Endung darf nicht leer sein"
+			errMsg = "Ending cannot be empty"
 			continue
 		}
 		rawList := splitList(value)
@@ -296,7 +296,7 @@ func (a *App) askCustomEndings() ([]string, error) {
 			list = append(list, normalized)
 		}
 		if len(list) == 0 {
-			errMsg = "Endung darf nicht leer sein"
+			errMsg = "Ending cannot be empty"
 			continue
 		}
 		return list, nil
@@ -322,7 +322,7 @@ func (a *App) askPort(edition ping.Edition) (int, error) {
 	defaultPort := ping.DefaultPort(edition)
 	var errMsg string
 	for {
-		value, err := promptInput(fmt.Sprintf("Port (%d)", defaultPort), "Leer lassen für Standardport", errMsg)
+		value, err := promptInput(fmt.Sprintf("Port (%d)", defaultPort), "Leave empty for the default port", errMsg)
 		if err != nil {
 			return 0, err
 		}
@@ -335,7 +335,7 @@ func (a *App) askPort(edition ping.Edition) (int, error) {
 			continue
 		}
 		if port == 0 {
-			errMsg = "Port darf nicht leer sein"
+			errMsg = "Port cannot be empty"
 			continue
 		}
 		return port, nil
@@ -355,9 +355,9 @@ func (a *App) executeDirect(config DirectConfig) error {
 	ctx, cancel := context.WithTimeout(context.Background(), a.inputTimeout)
 	defer cancel()
 
-	resultText, err := withSpinner("Abfrage", func(frame int) string {
+	resultText, err := withSpinner("Query", func(frame int) string {
 		_ = frame
-		return "Server wird abgefragt"
+		return "Querying server"
 	}, 120*time.Millisecond, func() (string, error) {
 		result, err := ping.Execute(ctx, config.Edition, config.Host, config.Port)
 		if err != nil {
@@ -369,7 +369,7 @@ func (a *App) executeDirect(config DirectConfig) error {
 		return err
 	}
 
-	renderTextPage("Ergebnis", resultText)
+	renderTextPage("Result", resultText)
 	return nil
 }
 
@@ -379,7 +379,7 @@ func (a *App) executeLookup(config LookupConfig) error {
 	var current atomic.Value
 	current.Store(ping.LookupProgress{})
 
-	resultText, err := withSpinner("IP Lookup", func(frame int) string {
+	resultText, err := withSpinner("IP lookup", func(frame int) string {
 		progress := current.Load().(ping.LookupProgress)
 		return formatLookupProgress(progress, frame)
 	}, 120*time.Millisecond, func() (string, error) {
@@ -403,22 +403,22 @@ func (a *App) executeLookup(config LookupConfig) error {
 		return err
 	}
 
-	renderTextPage("Ergebnis", resultText)
+	renderTextPage("Result", resultText)
 	return nil
 }
 
 func formatLookupProgress(progress ping.LookupProgress, frame int) string {
 	if progress.Total == 0 {
-		return "Domains werden überprüft"
+		return "Checking domains"
 	}
 	subdomain := progress.Subdomain
 	if subdomain == "" {
-		subdomain = "(keine)"
+		subdomain = "(none)"
 	}
 	bar := buildProgressBar(progress.Completed, progress.Total, frame, 20)
 	percent := (float64(progress.Completed) / float64(progress.Total)) * 100
 	return fmt.Sprintf(
-		"%s %d/%d (%.0f%%)\nSubdomain: %-12s | Endung: %-10s | Host: %s",
+		"%s %d/%d (%.0f%%)\nSubdomain: %s\nEnding: %s\nHost: %s",
 		bar,
 		progress.Completed,
 		progress.Total,
@@ -455,7 +455,7 @@ func buildProgressBar(completed, total, frame, width int) string {
 }
 
 func (a *App) askAgain() (bool, error) {
-	index, err := selectOption("Nächster Schritt", []string{"Neue Abfrage", "Beenden"})
+	index, err := selectOption("Next step", []string{"New query", "Exit"})
 	if err != nil {
 		return false, err
 	}
@@ -464,12 +464,13 @@ func (a *App) askAgain() (bool, error) {
 
 func formatLookupResult(result ping.LookupResult) string {
 	var builder strings.Builder
-	builder.WriteString(fmt.Sprintf("Kombinationen geprüft: %d/%d\n", result.Completed, result.Attempts))
-	builder.WriteString(fmt.Sprintf("Treffer: %d\n", len(result.Matches)))
+	builder.WriteString("Summary\n")
+	builder.WriteString(fmt.Sprintf("• Checked combinations: %d/%d\n", result.Completed, result.Attempts))
+	builder.WriteString(fmt.Sprintf("• Matches: %d\n", len(result.Matches)))
 	builder.WriteString("\n")
 
 	if len(result.Matches) == 0 {
-		builder.WriteString("Keine passenden Server gefunden.")
+		builder.WriteString("No matching servers found.")
 		return builder.String()
 	}
 
