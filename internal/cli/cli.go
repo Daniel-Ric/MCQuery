@@ -14,14 +14,14 @@ import (
 )
 
 type App struct {
-	inputTimeout  time.Duration
-	lookupTimeout time.Duration
-	linkServer    *web.LinkServer
+	settings   Settings
+	linkServer *web.LinkServer
 }
 
 func NewApp() *App {
+	settings, _ := loadSettings()
 	return &App{
-		inputTimeout: 3 * time.Second,
+		settings: settings,
 	}
 }
 
@@ -74,6 +74,9 @@ func (a *App) collectConfig() (Config, error) {
 		}
 		return Config{Mode: mode, Lookup: lookup}, nil
 	}
+	if mode == ModeSettings {
+		return Config{Mode: mode}, nil
+	}
 
 	direct, err := a.collectDirectConfig()
 	if err != nil {
@@ -86,8 +89,9 @@ func (a *App) collectConfig() (Config, error) {
 type Mode string
 
 const (
-	ModeDirect Mode = "direct"
-	ModeLookup Mode = "lookup"
+	ModeDirect   Mode = "direct"
+	ModeLookup   Mode = "lookup"
+	ModeSettings Mode = "settings"
 )
 
 type DirectConfig struct {
@@ -159,12 +163,15 @@ func (a *App) collectLookupConfig() (LookupConfig, error) {
 }
 
 func (a *App) askMode() (Mode, error) {
-	index, err := selectOption("Start mode", []string{"UWP/TCP query", "IP lookup"})
+	index, err := selectOption("Start mode", []string{"UWP/TCP query", "IP lookup", "Settings"})
 	if err != nil {
 		return "", err
 	}
 	if index == 1 {
 		return ModeLookup, nil
+	}
+	if index == 2 {
+		return ModeSettings, nil
 	}
 	return ModeDirect, nil
 }
@@ -348,30 +355,43 @@ func (a *App) execute(config Config) error {
 	switch config.Mode {
 	case ModeLookup:
 		return a.executeLookup(config.Lookup)
+	case ModeSettings:
+		return a.manageSettings()
 	default:
 		return a.executeDirect(config.Direct)
 	}
 }
 
 func (a *App) executeDirect(config DirectConfig) error {
-	ctx, cancel := context.WithTimeout(context.Background(), a.inputTimeout)
-	defer cancel()
-
 	resultText, err := withSpinner("Query", func(frame int) string {
 		_ = frame
 		return "Querying server"
 	}, 120*time.Millisecond, func() (string, error) {
-		result, err := ping.Execute(ctx, config.Edition, config.Host, config.Port)
+		result, details, err := ping.Execute(context.Background(), ping.ExecuteConfig{
+			Edition:    config.Edition,
+			Host:       config.Host,
+			Port:       config.Port,
+			Timeout:    a.settings.RequestTimeout(),
+			RetryCount: a.settings.RetryCount,
+			RetryDelay: a.settings.RetryDelay(),
+			EnableSRV:  a.settings.EnableSRV,
+			IPMode:     a.settings.IPMode,
+		})
 		if err != nil {
 			return "", err
 		}
-		return result.String(), nil
+		return formatDirectResult(result, details, a.settings.Verbose), nil
 	})
 	if err != nil {
 		return err
 	}
 
 	renderTextPage("Result", resultText)
+	if a.settings.SaveResults {
+		if err := a.saveResult("Direct query", resultText); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -391,7 +411,15 @@ func (a *App) executeLookup(config LookupConfig) error {
 			BaseHost:      config.BaseHost,
 			Subdomains:    config.Subdomains,
 			DomainEndings: config.Endings,
-			Concurrency:   0,
+			Concurrency:   a.settings.LookupConcurrency,
+			RateLimit:     a.settings.LookupRateLimit,
+			Options: ping.ExecuteOptions{
+				Timeout:    a.settings.RequestTimeout(),
+				RetryCount: a.settings.RetryCount,
+				RetryDelay: a.settings.RetryDelay(),
+				EnableSRV:  a.settings.EnableSRV,
+				IPMode:     a.settings.IPMode,
+			},
 			Progress: func(progress ping.LookupProgress) {
 				current.Store(progress)
 			},
@@ -419,13 +447,18 @@ func (a *App) executeLookup(config LookupConfig) error {
 			a.linkServer = server
 			links = server.Links()
 		}
-		return formatLookupResult(result, links), nil
+		return formatLookupResult(result, links, a.settings.Verbose), nil
 	})
 	if err != nil {
 		return err
 	}
 
 	renderTextPage("Result", resultText)
+	if a.settings.SaveResults {
+		if err := a.saveResult("Lookup", resultText); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -484,7 +517,7 @@ func (a *App) askAgain() (bool, error) {
 	return index == 0, nil
 }
 
-func formatLookupResult(result ping.LookupResult, links []web.LookupLinkURLs) string {
+func formatLookupResult(result ping.LookupResult, links []web.LookupLinkURLs, verbose bool) string {
 	var builder strings.Builder
 	builder.WriteString("Summary\n")
 	builder.WriteString(fmt.Sprintf("• Checked combinations: %d/%d\n", result.Completed, result.Attempts))
@@ -505,7 +538,7 @@ func formatLookupResult(result ping.LookupResult, links []web.LookupLinkURLs) st
 			builder.WriteString(fmt.Sprintf("Add link (browser): %s\n", links[i].AddURL))
 			builder.WriteString(fmt.Sprintf("Join link (browser): %s\n", links[i].ConnectURL))
 		}
-		builder.WriteString(match.Result.String())
+		builder.WriteString(formatDirectResult(match.Result, match.Detail, verbose))
 		builder.WriteString("\n")
 	}
 	return builder.String()
