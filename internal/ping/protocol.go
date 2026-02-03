@@ -23,7 +23,7 @@ func resolveToIPv4(ctx context.Context, host string) (string, error) {
 			return a.IP.String(), nil
 		}
 	}
-	return "", fmt.Errorf("keine ipv4 adresse gefunden für %s", host)
+	return "", fmt.Errorf("no IPv4 address found for %s", host)
 }
 
 func writePacket(w io.Writer, payload []byte) error {
@@ -42,7 +42,7 @@ func readPacket(r io.Reader) ([]byte, error) {
 		return nil, err
 	}
 	if length < 0 {
-		return nil, fmt.Errorf("ungültige packet länge: %d", length)
+		return nil, fmt.Errorf("invalid packet length: %d", length)
 	}
 	payload := make([]byte, length)
 	if _, err := io.ReadFull(r, payload); err != nil {
@@ -67,7 +67,7 @@ func readVarInt(r io.Reader) (int, error) {
 	var result int
 	for {
 		if numRead > 5 {
-			return 0, fmt.Errorf("varint zu lang")
+			return 0, fmt.Errorf("varint too long")
 		}
 		var buf [1]byte
 		if _, err := r.Read(buf[:]); err != nil {
@@ -90,7 +90,7 @@ func readString(r io.Reader) (string, error) {
 		return "", err
 	}
 	if length < 0 {
-		return "", fmt.Errorf("ungültige string länge: %d", length)
+		return "", fmt.Errorf("invalid string length: %d", length)
 	}
 	buf := make([]byte, length)
 	if _, err := io.ReadFull(r, buf); err != nil {

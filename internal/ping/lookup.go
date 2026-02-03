@@ -42,13 +42,13 @@ type LookupProgress struct {
 func LookupDomains(ctx context.Context, config LookupConfig) (LookupResult, error) {
 	baseHost := strings.TrimSpace(config.BaseHost)
 	if baseHost == "" {
-		return LookupResult{}, fmt.Errorf("basis host darf nicht leer sein")
+		return LookupResult{}, fmt.Errorf("base host cannot be empty")
 	}
 
 	subdomains := normalizeSubdomains(config.Subdomains)
 	endings := normalizeEndings(config.DomainEndings)
 	if len(endings) == 0 {
-		return LookupResult{}, fmt.Errorf("keine domain-endungen angegeben")
+		return LookupResult{}, fmt.Errorf("no domain endings provided")
 	}
 	if len(subdomains) == 0 {
 		subdomains = []string{""}
@@ -56,7 +56,7 @@ func LookupDomains(ctx context.Context, config LookupConfig) (LookupResult, erro
 
 	total := len(subdomains) * len(endings)
 	if total == 0 {
-		return LookupResult{}, fmt.Errorf("keine kombinationen verfügbar")
+		return LookupResult{}, fmt.Errorf("no combinations available")
 	}
 	concurrency := config.Concurrency
 	if concurrency <= 0 {

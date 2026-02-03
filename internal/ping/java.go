@@ -46,7 +46,7 @@ func PingJava(ctx context.Context, host string, port int) (JavaStatus, error) {
 		return JavaStatus{}, err
 	}
 	if packetID != 0x00 {
-		return JavaStatus{}, fmt.Errorf("unerwartete status packet id: %d", packetID)
+		return JavaStatus{}, fmt.Errorf("unexpected status packet id: %d", packetID)
 	}
 
 	statusJSON, err := readString(respReader)
@@ -109,7 +109,7 @@ func pingJavaLatency(conn net.Conn) (int64, error) {
 		return 0, err
 	}
 	if packetID != 0x01 {
-		return 0, fmt.Errorf("unerwartete pong packet id: %d", packetID)
+		return 0, fmt.Errorf("unexpected pong packet id: %d", packetID)
 	}
 	var sent uint64
 	if err := binary.Read(respReader, binary.BigEndian, &sent); err != nil {

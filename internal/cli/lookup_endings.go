@@ -25,7 +25,7 @@ func loadDomainEndings() ([]string, error) {
 
 		iana, err := fetchIANATLDs(ctx)
 		if err != nil {
-			domainEndingsErr = fmt.Errorf("konnte endungs-pool nicht laden: %w", err)
+			domainEndingsErr = fmt.Errorf("could not load ending pool: %w", err)
 			domainEndingsCache = domainEndingPool
 			return
 		}
@@ -49,7 +49,7 @@ func fetchIANATLDs(ctx context.Context) ([]string, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("iana antwort: %s", resp.Status)
+		return nil, fmt.Errorf("iana response: %s", resp.Status)
 	}
 
 	scanner := bufio.NewScanner(resp.Body)
@@ -65,7 +65,7 @@ func fetchIANATLDs(ctx context.Context) ([]string, error) {
 		return nil, err
 	}
 	if len(list) == 0 {
-		return nil, fmt.Errorf("keine endungen gefunden")
+		return nil, fmt.Errorf("no endings found")
 	}
 	return list, nil
 }

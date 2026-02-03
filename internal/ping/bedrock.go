@@ -23,16 +23,16 @@ func mustHex(s string) []byte {
 
 func parsePong(buf []byte) (BedrockPong, error) {
 	if len(buf) < 35 {
-		return BedrockPong{}, fmt.Errorf("pong zu kurz: %d bytes", len(buf))
+		return BedrockPong{}, fmt.Errorf("pong too short: %d bytes", len(buf))
 	}
 
 	if buf[0] != 0x1c {
-		return BedrockPong{}, fmt.Errorf("unerwartete packet id: 0x%02x", buf[0])
+		return BedrockPong{}, fmt.Errorf("unexpected packet id: 0x%02x", buf[0])
 	}
 
 	nameLen := int(binary.BigEndian.Uint16(buf[33:35]))
 	if 35+nameLen > len(buf) {
-		return BedrockPong{}, fmt.Errorf("ungültige advertise länge: %d (buf=%d)", nameLen, len(buf))
+		return BedrockPong{}, fmt.Errorf("invalid advertise length: %d (buf=%d)", nameLen, len(buf))
 	}
 
 	advertise := string(buf[35 : 35+nameLen])

@@ -17,7 +17,7 @@ const (
 	colorBold   = "\033[1m"
 )
 
-var errAborted = errors.New("abgebrochen")
+var errAborted = errors.New("aborted")
 
 func supportsColor() bool {
 	if os.Getenv("NO_COLOR") != "" {
@@ -36,12 +36,12 @@ func style(text, color string) string {
 
 func promptInput(label, hint, errMsg string) (string, error) {
 	clearScreen()
-	fmt.Println(style(label, colorAccent))
+	renderHeader(label)
 	if hint != "" {
-		fmt.Println(style(hint, colorDim))
+		fmt.Println(style(fmt.Sprintf("Hint: %s", hint), colorDim))
 	}
 	if errMsg != "" {
-		fmt.Println(style(errMsg, colorWarn))
+		fmt.Println(style(fmt.Sprintf("⚠ %s", errMsg), colorWarn))
 	}
 	fmt.Println()
 	fmt.Print(style("> ", colorAccent))
@@ -55,7 +55,7 @@ func promptInput(label, hint, errMsg string) (string, error) {
 
 func selectOption(title string, options []string) (int, error) {
 	if len(options) == 0 {
-		return 0, errors.New("keine Auswahloptionen verfügbar")
+		return 0, errors.New("no options available")
 	}
 	fd := int(os.Stdin.Fd())
 	state, err := makeRaw(fd)
@@ -146,18 +146,18 @@ func renderMenuBlock(title string, options []string, selected int, hint string, 
 		clearScreen()
 	}
 	lines := 0
-	lines += printLine(style(title, colorAccent))
-	lines += printLine("")
+	lines += printLine(style(title, colorAccent+colorBold))
+	lines += printLine(style(strings.Repeat("─", 44), colorDim))
 	for i, option := range options {
 		if i == selected {
-			lines += printLine(fmt.Sprintf("%s %s", style(">", colorAccent+colorBold), style(option, colorBold)))
+			lines += printLine(fmt.Sprintf("%s %s", style("❯", colorAccent+colorBold), style(option, colorBold)))
 			continue
 		}
-		lines += printLine(fmt.Sprintf("  %s", option))
+		lines += printLine(fmt.Sprintf("  • %s", option))
 	}
 	lines += printLine("")
 	if hint == "" {
-		hint = "Pfeiltasten (oder W/S), Enter zum Bestätigen"
+		hint = "Use ↑/↓ (or W/S), Enter to confirm"
 	}
 	lines += printLine(style(hint, colorDim))
 	return lines
@@ -198,8 +198,7 @@ func renderTextPage(title, content string) {
 
 func renderPage(title string, lines []string) {
 	clearScreen()
-	fmt.Println(style(title, colorAccent))
-	fmt.Println()
+	renderHeader(title)
 	for _, line := range lines {
 		if strings.TrimSpace(line) == "" {
 			fmt.Println()
@@ -211,6 +210,12 @@ func renderPage(title string, lines []string) {
 
 func renderSpinnerPage(title, message, frame string) {
 	renderPage(title, []string{fmt.Sprintf("%s %s", style(message, colorDim), style(frame, colorAccent))})
+}
+
+func renderHeader(title string) {
+	fmt.Println(style(title, colorAccent+colorBold))
+	fmt.Println(style(strings.Repeat("─", 44), colorDim))
+	fmt.Println()
 }
 
 func withSpinner(title string, message func(frame int) string, tick time.Duration, action func() (string, error)) (string, error) {
@@ -227,8 +232,7 @@ func withSpinner(title string, message func(frame int) string, tick time.Duratio
 	}()
 
 	clearScreen()
-	fmt.Println(style(title, colorAccent))
-	fmt.Println()
+	renderHeader(title)
 
 	frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 	ticker := time.NewTicker(tick)
