@@ -70,14 +70,14 @@ func buildUnconnectedPing() ([]byte, error) {
 	return buf, nil
 }
 
-func PingBedrock(ctx context.Context, host string, port int) (BedrockPong, error) {
-	ipv4, err := resolveToIPv4(ctx, host)
-	if err != nil {
-		return BedrockPong{}, err
+func PingBedrock(ctx context.Context, ip net.IP, host string, port int) (BedrockPong, error) {
+	network := "udp6"
+	if ip.To4() != nil {
+		network = "udp4"
 	}
 
-	raddr := &net.UDPAddr{IP: net.ParseIP(ipv4), Port: port}
-	conn, err := net.DialUDP("udp4", nil, raddr)
+	raddr := &net.UDPAddr{IP: ip, Port: port}
+	conn, err := net.DialUDP(network, nil, raddr)
 	if err != nil {
 		return BedrockPong{}, err
 	}
@@ -119,7 +119,7 @@ func PingBedrock(ctx context.Context, host string, port int) (BedrockPong, error
 	if err != nil {
 		var netErr net.Error
 		if errors.As(err, &netErr) && netErr.Timeout() {
-			return BedrockPong{}, fmt.Errorf("timeout beim ping von %s:%d", host, port)
+			return BedrockPong{}, fmt.Errorf("timeout while pinging %s:%d", host, port)
 		}
 		return BedrockPong{}, err
 	}
