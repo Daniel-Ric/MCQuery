@@ -3,6 +3,7 @@ package ping
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -53,13 +54,20 @@ func LookupDomains(ctx context.Context, config LookupConfig) (LookupResult, erro
 		subdomains = []string{""}
 	}
 
-	concurrency := config.Concurrency
-	if concurrency <= 0 {
-		concurrency = 16
-	}
 	total := len(subdomains) * len(endings)
 	if total == 0 {
 		return LookupResult{}, fmt.Errorf("keine kombinationen verfügbar")
+	}
+	concurrency := config.Concurrency
+	if concurrency <= 0 {
+		base := runtime.NumCPU() * 8
+		if base < 32 {
+			base = 32
+		}
+		concurrency = base
+	}
+	if concurrency > total {
+		concurrency = total
 	}
 
 	type lookupCandidate struct {
