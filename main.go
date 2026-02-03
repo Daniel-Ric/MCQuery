@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"regexp"
@@ -26,6 +29,16 @@ type BedrockPong struct {
 	CurrentPlayers  string
 	MaxPlayers      string
 	CleanMOTD       string
+}
+
+type JavaStatus struct {
+	VersionName     string
+	ProtocolVersion int
+	CurrentPlayers  int
+	MaxPlayers      int
+	MOTD            string
+	CleanMOTD       string
+	LatencyMillis   int64
 }
 
 func mustHex(s string) []byte {
@@ -180,27 +193,304 @@ func PingBedrock(ctx context.Context, host string, port int) (BedrockPong, error
 	return parsePong(buf[:n])
 }
 
+func PingJava(ctx context.Context, host string, port int) (JavaStatus, error) {
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
+	dialer := &net.Dialer{}
+	conn, err := dialer.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return JavaStatus{}, err
+	}
+	defer conn.Close()
+
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = conn.SetDeadline(deadline)
+	} else {
+		_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
+	}
+
+	if err := writeHandshake(conn, host, port); err != nil {
+		return JavaStatus{}, err
+	}
+	if err := writeStatusRequest(conn); err != nil {
+		return JavaStatus{}, err
+	}
+
+	respPayload, err := readPacket(conn)
+	if err != nil {
+		return JavaStatus{}, err
+	}
+
+	respReader := bytes.NewReader(respPayload)
+	packetID, err := readVarInt(respReader)
+	if err != nil {
+		return JavaStatus{}, err
+	}
+	if packetID != 0x00 {
+		return JavaStatus{}, fmt.Errorf("unexpected status packet id: %d", packetID)
+	}
+
+	statusJSON, err := readString(respReader)
+	if err != nil {
+		return JavaStatus{}, err
+	}
+
+	status, err := parseJavaStatus([]byte(statusJSON))
+	if err != nil {
+		return JavaStatus{}, err
+	}
+
+	latency, err := pingJavaLatency(conn)
+	if err != nil {
+		return JavaStatus{}, err
+	}
+	status.LatencyMillis = latency
+
+	return status, nil
+}
+
+func writeHandshake(w io.Writer, host string, port int) error {
+	const protocolVersion = 754
+	payload := &bytes.Buffer{}
+	writeVarInt(payload, 0x00)                                                    // Packet ID
+	writeVarInt(payload, protocolVersion)                                         // Protocol version
+	writeString(payload, host)                                                    // Server address
+	if err := binary.Write(payload, binary.BigEndian, uint16(port)); err != nil { // Server port
+		return err
+	}
+	writeVarInt(payload, 0x01) // Next state: status
+
+	return writePacket(w, payload.Bytes())
+}
+
+func writeStatusRequest(w io.Writer) error {
+	payload := &bytes.Buffer{}
+	writeVarInt(payload, 0x00)
+	return writePacket(w, payload.Bytes())
+}
+
+func pingJavaLatency(conn net.Conn) (int64, error) {
+	payload := &bytes.Buffer{}
+	writeVarInt(payload, 0x01)
+	now := time.Now().UnixMilli()
+	if err := binary.Write(payload, binary.BigEndian, uint64(now)); err != nil {
+		return 0, err
+	}
+	if err := writePacket(conn, payload.Bytes()); err != nil {
+		return 0, err
+	}
+
+	respPayload, err := readPacket(conn)
+	if err != nil {
+		return 0, err
+	}
+	respReader := bytes.NewReader(respPayload)
+	packetID, err := readVarInt(respReader)
+	if err != nil {
+		return 0, err
+	}
+	if packetID != 0x01 {
+		return 0, fmt.Errorf("unexpected pong packet id: %d", packetID)
+	}
+	var sent uint64
+	if err := binary.Read(respReader, binary.BigEndian, &sent); err != nil {
+		return 0, err
+	}
+	return time.Now().UnixMilli() - int64(sent), nil
+}
+
+func parseJavaStatus(data []byte) (JavaStatus, error) {
+	type rawStatus struct {
+		Version struct {
+			Name     string `json:"name"`
+			Protocol int    `json:"protocol"`
+		} `json:"version"`
+		Players struct {
+			Max    int `json:"max"`
+			Online int `json:"online"`
+		} `json:"players"`
+		Description any `json:"description"`
+	}
+
+	var raw rawStatus
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return JavaStatus{}, err
+	}
+
+	motd := extractJavaDescription(raw.Description)
+	return JavaStatus{
+		VersionName:     raw.Version.Name,
+		ProtocolVersion: raw.Version.Protocol,
+		CurrentPlayers:  raw.Players.Online,
+		MaxPlayers:      raw.Players.Max,
+		MOTD:            motd,
+		CleanMOTD:       stripMCFormatting(motd),
+	}, nil
+}
+
+func extractJavaDescription(desc any) string {
+	switch v := desc.(type) {
+	case string:
+		return v
+	case map[string]any:
+		var builder strings.Builder
+		appendDescriptionText(&builder, v)
+		return builder.String()
+	default:
+		return ""
+	}
+}
+
+func appendDescriptionText(builder *strings.Builder, desc map[string]any) {
+	if text, ok := desc["text"].(string); ok {
+		builder.WriteString(text)
+	}
+	if extra, ok := desc["extra"].([]any); ok {
+		for _, item := range extra {
+			switch itemValue := item.(type) {
+			case string:
+				builder.WriteString(itemValue)
+			case map[string]any:
+				appendDescriptionText(builder, itemValue)
+			}
+		}
+	}
+}
+
+func writePacket(w io.Writer, payload []byte) error {
+	header := &bytes.Buffer{}
+	writeVarInt(header, len(payload))
+	if _, err := w.Write(header.Bytes()); err != nil {
+		return err
+	}
+	_, err := w.Write(payload)
+	return err
+}
+
+func readPacket(r io.Reader) ([]byte, error) {
+	length, err := readVarInt(r)
+	if err != nil {
+		return nil, err
+	}
+	if length < 0 {
+		return nil, fmt.Errorf("invalid packet length: %d", length)
+	}
+	payload := make([]byte, length)
+	if _, err := io.ReadFull(r, payload); err != nil {
+		return nil, err
+	}
+	return payload, nil
+}
+
+func writeVarInt(w io.Writer, value int) {
+	for {
+		if (value & ^0x7F) == 0 {
+			_, _ = w.Write([]byte{byte(value)})
+			return
+		}
+		_, _ = w.Write([]byte{byte(value&0x7F | 0x80)})
+		value >>= 7
+	}
+}
+
+func readVarInt(r io.Reader) (int, error) {
+	var numRead int
+	var result int
+	for {
+		if numRead > 5 {
+			return 0, fmt.Errorf("varint too long")
+		}
+		var buf [1]byte
+		if _, err := r.Read(buf[:]); err != nil {
+			return 0, err
+		}
+		value := int(buf[0] & 0x7F)
+		result |= value << (7 * numRead)
+
+		numRead++
+		if (buf[0] & 0x80) == 0 {
+			break
+		}
+	}
+	return result, nil
+}
+
+func readString(r io.Reader) (string, error) {
+	length, err := readVarInt(r)
+	if err != nil {
+		return "", err
+	}
+	if length < 0 {
+		return "", fmt.Errorf("invalid string length: %d", length)
+	}
+	buf := make([]byte, length)
+	if _, err := io.ReadFull(r, buf); err != nil {
+		return "", err
+	}
+	return string(buf), nil
+}
+
+func writeString(w io.Writer, value string) {
+	writeVarInt(w, len(value))
+	_, _ = w.Write([]byte(value))
+}
+
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Println("Usage: go run main.go <host> [port]")
-		fmt.Println("Example: go run main.go play.example.com 19132")
+		fmt.Println("Usage: go run main.go <host> [port] [edition]")
+		fmt.Println("Example (Bedrock): go run main.go play.example.com 19132 bedrock")
+		fmt.Println("Example (Java): go run main.go play.example.com 25565 java")
 		os.Exit(1)
 	}
 
 	host := os.Args[1]
+	edition := "bedrock"
 	port := 19132
+
 	if len(os.Args) >= 3 {
-		p, err := strconv.Atoi(os.Args[2])
-		if err != nil {
-			fmt.Println("Invalid port:", os.Args[2])
+		if os.Args[2] == "java" || os.Args[2] == "bedrock" {
+			edition = os.Args[2]
+		} else {
+			p, err := strconv.Atoi(os.Args[2])
+			if err != nil {
+				fmt.Println("Invalid port:", os.Args[2])
+				os.Exit(1)
+			}
+			port = p
+		}
+	}
+
+	if len(os.Args) >= 4 {
+		if os.Args[3] == "java" || os.Args[3] == "bedrock" {
+			edition = os.Args[3]
+		} else {
+			fmt.Println("Invalid edition:", os.Args[3])
 			os.Exit(1)
 		}
-		port = p
+	}
+
+	if edition == "java" && port == 19132 {
+		port = 25565
 	}
 
 	// Timeout: 3 seconds
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
+
+	if edition == "java" {
+		status, err := PingJava(ctx, host, port)
+		if err != nil {
+			fmt.Println("Ping failed:", err)
+			os.Exit(1)
+		}
+
+		fmt.Println("MOTD:", status.MOTD)
+		fmt.Println("CleanMOTD:", status.CleanMOTD)
+		fmt.Println("Version:", status.VersionName)
+		fmt.Println("Protocol:", status.ProtocolVersion)
+		fmt.Println("Players:", fmt.Sprintf("%d/%d", status.CurrentPlayers, status.MaxPlayers))
+		fmt.Println("Latency(ms):", status.LatencyMillis)
+		return
+	}
 
 	pong, err := PingBedrock(ctx, host, port)
 	if err != nil {
