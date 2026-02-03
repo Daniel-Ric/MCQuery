@@ -18,7 +18,7 @@ type App struct {
 func NewApp() *App {
 	return &App{
 		inputTimeout:  3 * time.Second,
-		lookupTimeout: 12 * time.Second,
+		lookupTimeout: 45 * time.Second,
 	}
 }
 
@@ -26,15 +26,24 @@ func (a *App) Run() error {
 	for {
 		config, err := a.collectConfig()
 		if err != nil {
+			if errors.Is(err, errAborted) {
+				return nil
+			}
 			return err
 		}
 
 		if err := a.execute(config); err != nil {
+			if errors.Is(err, errAborted) {
+				return nil
+			}
 			return err
 		}
 
 		again, err := a.askAgain()
 		if err != nil {
+			if errors.Is(err, errAborted) {
+				return nil
+			}
 			return err
 		}
 		if !again {
@@ -225,7 +234,11 @@ func (a *App) askDomainEndings() ([]string, error) {
 		return nil, err
 	}
 	if index == 1 {
-		return domainEndingPool, nil
+		endings, err := loadDomainEndings()
+		if err != nil {
+			return endings, nil
+		}
+		return endings, nil
 	}
 	var errMsg string
 	for {
@@ -300,12 +313,13 @@ func (a *App) executeLookup(config LookupConfig) error {
 
 	resultText, err := withSpinner("IP Lookup", "Domains werden überprüft", 120*time.Millisecond, func() (string, error) {
 		result, lookupErr := ping.LookupDomains(ctx, ping.LookupConfig{
-			Edition:       config.Edition,
-			Port:          config.Port,
-			BaseHost:      config.BaseHost,
-			Subdomains:    config.Subdomains,
-			DomainEndings: config.Endings,
-			Concurrency:   24,
+			Edition:        config.Edition,
+			Port:           config.Port,
+			BaseHost:       config.BaseHost,
+			Subdomains:     config.Subdomains,
+			DomainEndings:  config.Endings,
+			Concurrency:    24,
+			PerHostTimeout: 2 * time.Second,
 		})
 		if lookupErr != nil && !errors.Is(lookupErr, context.DeadlineExceeded) {
 			return "", lookupErr
