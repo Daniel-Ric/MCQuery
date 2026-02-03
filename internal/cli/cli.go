@@ -12,7 +12,8 @@ import (
 )
 
 type App struct {
-	inputTimeout time.Duration
+	inputTimeout  time.Duration
+	lookupTimeout time.Duration
 }
 
 func NewApp() *App {
