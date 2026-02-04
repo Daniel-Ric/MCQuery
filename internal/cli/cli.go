@@ -428,7 +428,7 @@ func (a *App) executeLookup(config LookupConfig) error {
 			return "", lookupErr
 		}
 		var links []web.LookupLinkURLs
-		if len(result.Matches) > 0 {
+		if config.Edition == ping.EditionBedrock && len(result.Matches) > 0 {
 			if a.linkServer != nil {
 				_ = a.linkServer.Close()
 			}
