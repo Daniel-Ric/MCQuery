@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -397,13 +396,10 @@ func (a *App) executeDirect(config DirectConfig) error {
 
 func (a *App) executeLookup(config LookupConfig) error {
 	ctx := context.Background()
-
-	var current atomic.Value
-	current.Store(ping.LookupProgress{})
+	progressView := newLookupProgressView(a.settings, config)
 
 	resultText, err := withSpinner("IP lookup", func(frame int) string {
-		progress := current.Load().(ping.LookupProgress)
-		return formatLookupProgress(progress, frame)
+		return progressView.Render(frame)
 	}, 120*time.Millisecond, func() (string, error) {
 		result, lookupErr := ping.LookupDomains(ctx, ping.LookupConfig{
 			Edition:       config.Edition,
@@ -421,7 +417,7 @@ func (a *App) executeLookup(config LookupConfig) error {
 				IPMode:     a.settings.IPMode,
 			},
 			Progress: func(progress ping.LookupProgress) {
-				current.Store(progress)
+				progressView.Observe(progress)
 			},
 		})
 		if lookupErr != nil {
@@ -465,53 +461,6 @@ func (a *App) executeLookup(config LookupConfig) error {
 		}
 	}
 	return nil
-}
-
-func formatLookupProgress(progress ping.LookupProgress, frame int) string {
-	if progress.Total == 0 {
-		return "Checking domains"
-	}
-	subdomain := progress.Subdomain
-	if subdomain == "" {
-		subdomain = "(none)"
-	}
-	bar := buildProgressBar(progress.Completed, progress.Total, frame, 20)
-	percent := (float64(progress.Completed) / float64(progress.Total)) * 100
-	return fmt.Sprintf(
-		"%s %d/%d (%.0f%%)\nSubdomain: %s\nEnding: %s\nHost: %s",
-		bar,
-		progress.Completed,
-		progress.Total,
-		percent,
-		subdomain,
-		progress.Ending,
-		progress.Host,
-	)
-}
-
-func buildProgressBar(completed, total, frame, width int) string {
-	if total <= 0 || width <= 0 {
-		return "[--------------------]"
-	}
-	if completed > total {
-		completed = total
-	}
-	filled := (completed * width) / total
-	if filled > width {
-		filled = width
-	}
-	bar := make([]rune, width)
-	for i := 0; i < width; i++ {
-		bar[i] = '░'
-	}
-	for i := 0; i < filled; i++ {
-		bar[i] = '█'
-	}
-	if completed < total && filled < width {
-		animation := []rune{'▏', '▎', '▍', '▌', '▋', '▊', '▉'}
-		bar[filled] = animation[frame%len(animation)]
-	}
-	return fmt.Sprintf("[%s]", string(bar))
 }
 
 func (a *App) askAgain() (bool, error) {
