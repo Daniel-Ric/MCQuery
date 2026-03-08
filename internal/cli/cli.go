@@ -397,6 +397,7 @@ func (a *App) executeDirect(config DirectConfig) error {
 func (a *App) executeLookup(config LookupConfig) error {
 	ctx := context.Background()
 	progressView := newLookupProgressView(a.settings, config)
+	startedAt := time.Now()
 
 	resultText, err := withSpinner("IP lookup", func(frame int) string {
 		return progressView.Render(frame)
@@ -444,9 +445,14 @@ func (a *App) executeLookup(config LookupConfig) error {
 			links = server.Links()
 		}
 		metrics := lookupMetrics{
-			BaseHost:   config.BaseHost,
-			Subdomains: countLookupSubdomains(config.Subdomains),
-			Endings:    countLookupEndings(config.Endings),
+			BaseHost:      config.BaseHost,
+			Subdomains:    countLookupSubdomains(config.Subdomains),
+			Endings:       countLookupEndings(config.Endings),
+			Duration:      time.Since(startedAt),
+			AverageRate:   calculateLookupAverageRate(result.Completed, startedAt),
+			Concurrency:   resolveLookupConcurrency(a.settings.LookupConcurrency, result.Attempts),
+			RateLimit:     a.settings.LookupRateLimit,
+			CompletionPct: calculateLookupCompletion(result.Completed, result.Attempts),
 		}
 		return formatLookupResult(result, links, metrics, a.settings.Verbose), nil
 	})
@@ -472,9 +478,14 @@ func (a *App) askAgain() (bool, error) {
 }
 
 type lookupMetrics struct {
-	BaseHost   string
-	Subdomains int
-	Endings    int
+	BaseHost      string
+	Subdomains    int
+	Endings       int
+	Duration      time.Duration
+	AverageRate   float64
+	Concurrency   int
+	RateLimit     int
+	CompletionPct float64
 }
 
 func countLookupSubdomains(values []string) int {
@@ -509,7 +520,12 @@ func formatLookupResult(result ping.LookupResult, links []web.LookupLinkURLs, me
 	builder.WriteString(fmt.Sprintf("• Subdomains: %d\n", metrics.Subdomains))
 	builder.WriteString(fmt.Sprintf("• Domain endings: %d\n", metrics.Endings))
 	builder.WriteString(fmt.Sprintf("• Checked combinations: %d/%d\n", result.Completed, result.Attempts))
+	builder.WriteString(fmt.Sprintf("• Completion: %.1f%%\n", metrics.CompletionPct))
 	builder.WriteString(fmt.Sprintf("• Matches: %d\n", len(result.Matches)))
+	builder.WriteString(fmt.Sprintf("• Elapsed: %s\n", formatLookupDuration(metrics.Duration)))
+	builder.WriteString(fmt.Sprintf("• Average throughput: %s\n", formatLookupRate(metrics.AverageRate)))
+	builder.WriteString(fmt.Sprintf("• Pipeline: %d workers\n", metrics.Concurrency))
+	builder.WriteString(fmt.Sprintf("• Rate cap: %s\n", formatLookupRateCap(metrics.RateLimit)))
 	builder.WriteString("\n")
 
 	if len(result.Matches) == 0 {
