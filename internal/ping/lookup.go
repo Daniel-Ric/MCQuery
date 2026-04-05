@@ -43,6 +43,13 @@ type LookupProgress struct {
 	Completed int
 }
 
+type lookupCandidate struct {
+	subdomain string
+	ending    string
+	host      string
+	attempt   int
+}
+
 func LookupDomains(ctx context.Context, config LookupConfig) (LookupResult, error) {
 	baseHost := strings.TrimSpace(config.BaseHost)
 	if baseHost == "" {
@@ -72,13 +79,6 @@ func LookupDomains(ctx context.Context, config LookupConfig) (LookupResult, erro
 	}
 	if concurrency > total {
 		concurrency = total
-	}
-
-	type lookupCandidate struct {
-		subdomain string
-		ending    string
-		host      string
-		attempt   int
 	}
 
 	candidates := make(chan lookupCandidate, concurrency)
@@ -144,25 +144,7 @@ func LookupDomains(ctx context.Context, config LookupConfig) (LookupResult, erro
 	}
 
 	go func() {
-		defer close(candidates)
-		attempt := 0
-		for _, sub := range subdomains {
-			for _, ending := range endings {
-				attempt++
-				host := buildHost(sub, baseHost, ending)
-				select {
-				case <-ctx.Done():
-					return
-				case <-limiter:
-				case candidates <- lookupCandidate{
-					subdomain: sub,
-					ending:    ending,
-					host:      host,
-					attempt:   attempt,
-				}:
-				}
-			}
-		}
+		enqueueLookupCandidates(ctx, candidates, subdomains, endings, baseHost, limiter)
 	}()
 
 	go func() {
@@ -232,4 +214,35 @@ func buildHost(subdomain, baseHost, ending string) string {
 		parts = append(parts, ending)
 	}
 	return strings.Join(parts, ".")
+}
+
+func enqueueLookupCandidates(ctx context.Context, candidates chan<- lookupCandidate, subdomains, endings []string, baseHost string, limiter <-chan time.Time) {
+	defer close(candidates)
+
+	attempt := 0
+	for _, sub := range subdomains {
+		for _, ending := range endings {
+			attempt++
+			if limiter != nil {
+				select {
+				case <-ctx.Done():
+					return
+				case <-limiter:
+				}
+			}
+
+			candidate := lookupCandidate{
+				subdomain: sub,
+				ending:    ending,
+				host:      buildHost(sub, baseHost, ending),
+				attempt:   attempt,
+			}
+
+			select {
+			case <-ctx.Done():
+				return
+			case candidates <- candidate:
+			}
+		}
+	}
 }
