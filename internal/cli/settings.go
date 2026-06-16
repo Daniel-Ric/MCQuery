@@ -19,8 +19,12 @@ type Settings struct {
 	LookupConcurrency     int         `json:"lookup_concurrency"`
 	LookupRateLimit       int         `json:"lookup_rate_limit"`
 	Verbose               bool        `json:"verbose"`
+	ColorMOTD             bool        `json:"color_motd"`
 	SaveResults           bool        `json:"save_results"`
+	ExportFormat          string      `json:"export_format"`
+	SaveJavaIcons         bool        `json:"save_java_icons"`
 	ResultsPath           string      `json:"results_path"`
+	CheckForUpdates       bool        `json:"check_for_updates"`
 }
 
 func defaultSettings() Settings {
@@ -33,8 +37,12 @@ func defaultSettings() Settings {
 		LookupConcurrency:     0,
 		LookupRateLimit:       0,
 		Verbose:               false,
+		ColorMOTD:             true,
 		SaveResults:           false,
+		ExportFormat:          exportFormatText,
+		SaveJavaIcons:         true,
 		ResultsPath:           defaultResultsPath(),
+		CheckForUpdates:       false,
 	}
 }
 
@@ -73,19 +81,15 @@ func saveSettings(settings Settings) error {
 }
 
 func settingsPath() (string, error) {
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(dir, "mcquery", "settings.json"), nil
+	return configFile("settings.json")
 }
 
 func defaultResultsPath() string {
-	dir, err := os.UserConfigDir()
+	dir, err := configDir()
 	if err != nil {
 		return "mcquery-results"
 	}
-	return filepath.Join(dir, "mcquery", "results")
+	return filepath.Join(dir, "results")
 }
 
 func (s Settings) RequestTimeout() time.Duration {
@@ -120,6 +124,9 @@ func (s Settings) Validate() error {
 	}
 	if s.IPMode != ping.IPModeAuto && s.IPMode != ping.IPModeIPv4 && s.IPMode != ping.IPModeIPv6 {
 		return fmt.Errorf("invalid IP mode")
+	}
+	if !isValidExportFormat(s.ExportFormat) {
+		return fmt.Errorf("invalid export format")
 	}
 	return nil
 }

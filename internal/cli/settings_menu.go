@@ -14,17 +14,22 @@ import (
 func (a *App) manageSettings() error {
 	for {
 		options := []string{
-			fmt.Sprintf("Request timeout (seconds): %d", a.settings.RequestTimeoutSeconds),
-			fmt.Sprintf("Retry count: %d", a.settings.RetryCount),
-			fmt.Sprintf("Retry delay (ms): %d", a.settings.RetryDelayMillis),
-			fmt.Sprintf("Enable Java SRV: %t", a.settings.EnableSRV),
+			fmt.Sprintf("Timeout: %d s", a.settings.RequestTimeoutSeconds),
+			fmt.Sprintf("Retries: %d", a.settings.RetryCount),
+			fmt.Sprintf("Retry delay: %d ms", a.settings.RetryDelayMillis),
+			fmt.Sprintf("Java SRV lookup: %s", boolText(a.settings.EnableSRV)),
 			fmt.Sprintf("IP mode: %s", a.settings.IPMode),
-			fmt.Sprintf("Lookup concurrency: %d", a.settings.LookupConcurrency),
-			fmt.Sprintf("Lookup rate limit (req/s): %d", a.settings.LookupRateLimit),
-			fmt.Sprintf("Verbose output: %t", a.settings.Verbose),
-			fmt.Sprintf("Save results: %t", a.settings.SaveResults),
+			fmt.Sprintf("Lookup workers: %s", lookupWorkerSettingText(a.settings.LookupConcurrency)),
+			fmt.Sprintf("Lookup rate cap: %s", settingRateLimitText(a.settings.LookupRateLimit)),
+			fmt.Sprintf("Verbose output: %s", boolText(a.settings.Verbose)),
+			fmt.Sprintf("Colored MOTD: %s", boolText(a.settings.ColorMOTD)),
+			fmt.Sprintf("Save results: %s", boolText(a.settings.SaveResults)),
+			fmt.Sprintf("Export format: %s", a.settings.ExportFormat),
+			fmt.Sprintf("Save Java icons: %s", boolText(a.settings.SaveJavaIcons)),
 			fmt.Sprintf("Results path: %s", a.settings.ResultsPath),
-			"Reset settings",
+			fmt.Sprintf("Check for updates: %s", boolText(a.settings.CheckForUpdates)),
+			"Lookup presets: Subdomains and endings",
+			"Reset settings: Restore defaults",
 			"Back",
 		}
 		index, err := selectOption("Settings", options)
@@ -81,12 +86,30 @@ func (a *App) manageSettings() error {
 			}
 			a.settings.Verbose = value
 		case 8:
+			value, err := askBoolValue("Colored MOTD", a.settings.ColorMOTD)
+			if err != nil {
+				return err
+			}
+			a.settings.ColorMOTD = value
+		case 9:
 			value, err := askBoolValue("Save results", a.settings.SaveResults)
 			if err != nil {
 				return err
 			}
 			a.settings.SaveResults = value
-		case 9:
+		case 10:
+			value, err := askExportFormat(a.settings.ExportFormat)
+			if err != nil {
+				return err
+			}
+			a.settings.ExportFormat = value
+		case 11:
+			value, err := askBoolValue("Save Java icons", a.settings.SaveJavaIcons)
+			if err != nil {
+				return err
+			}
+			a.settings.SaveJavaIcons = value
+		case 12:
 			value, err := askTextValue("Results path", a.settings.ResultsPath)
 			if err != nil {
 				return err
@@ -95,7 +118,25 @@ func (a *App) manageSettings() error {
 				value = defaultResultsPath()
 			}
 			a.settings.ResultsPath = value
-		case 10:
+		case 13:
+			value, err := askBoolValue("Check for updates", a.settings.CheckForUpdates)
+			if err != nil {
+				return err
+			}
+			a.settings.CheckForUpdates = value
+		case 14:
+			if err := a.manageLookupPresets(); err != nil {
+				return err
+			}
+			continue
+		case 15:
+			ok, err := askConfirm("Reset all settings?")
+			if err != nil {
+				return err
+			}
+			if !ok {
+				continue
+			}
 			a.settings = defaultSettings()
 		default:
 			return nil
@@ -109,9 +150,47 @@ func (a *App) manageSettings() error {
 	}
 }
 
+func boolText(value bool) string {
+	if value {
+		return "Enabled"
+	}
+	return "Disabled"
+}
+
+func lookupWorkerSettingText(value int) string {
+	if value <= 0 {
+		return fmt.Sprintf("Auto (%d)", ping.AutoLookupConcurrencyTarget())
+	}
+	return strconv.Itoa(value)
+}
+
+func settingRateLimitText(value int) string {
+	if value <= 0 {
+		return "Uncapped"
+	}
+	return fmt.Sprintf("%d req/s", value)
+}
+
+func askExportFormat(current string) (string, error) {
+	options := []string{"text", "json", "csv"}
+	initial := 0
+	for i, option := range options {
+		if option == normalizeExportFormat(current) {
+			initial = i
+			break
+		}
+	}
+	index, err := selectOptionWithInitial("Export format", options, initial)
+	if err != nil {
+		return current, err
+	}
+	return options[index], nil
+}
+
 func askIntValue(label string, current int) (int, error) {
+	var errMsg string
 	for {
-		value, err := promptInput(label, fmt.Sprintf("Current: %d", current), "")
+		value, err := promptInput(label, fmt.Sprintf("Current: %d. Leave empty to keep it.", current), errMsg)
 		if err != nil {
 			return 0, err
 		}
@@ -121,6 +200,11 @@ func askIntValue(label string, current int) (int, error) {
 		}
 		parsed, err := strconv.Atoi(value)
 		if err != nil {
+			errMsg = "Enter a whole number"
+			continue
+		}
+		if parsed < 0 {
+			errMsg = "Value cannot be negative"
 			continue
 		}
 		return parsed, nil
@@ -128,7 +212,7 @@ func askIntValue(label string, current int) (int, error) {
 }
 
 func askTextValue(label, current string) (string, error) {
-	value, err := promptInput(label, fmt.Sprintf("Current: %s", current), "")
+	value, err := promptInput(label, fmt.Sprintf("Current: %s. Leave empty to keep it.", current), "")
 	if err != nil {
 		return "", err
 	}
@@ -139,17 +223,28 @@ func askTextValue(label, current string) (string, error) {
 }
 
 func askBoolValue(label string, current bool) (bool, error) {
-	options := []string{"Disabled", "Enabled"}
-	index, err := selectOption(label, options)
+	options := []string{"Enabled", "Disabled"}
+	initial := 1
+	if current {
+		initial = 0
+	}
+	index, err := selectOptionWithInitial(label, options, initial)
 	if err != nil {
 		return false, err
 	}
-	return index == 1, nil
+	return index == 0, nil
 }
 
 func askIPMode(current ping.IPMode) (ping.IPMode, error) {
 	options := []string{"Auto", "IPv4", "IPv6"}
-	index, err := selectOption("IP mode", options)
+	initial := 0
+	switch current {
+	case ping.IPModeIPv4:
+		initial = 1
+	case ping.IPModeIPv6:
+		initial = 2
+	}
+	index, err := selectOptionWithInitial("IP mode", options, initial)
 	if err != nil {
 		return current, err
 	}
