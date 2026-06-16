@@ -3,6 +3,7 @@ package ping
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -128,7 +129,8 @@ func parseJavaStatus(data []byte) (JavaStatus, error) {
 			Max    int `json:"max"`
 			Online int `json:"online"`
 		} `json:"players"`
-		Description any `json:"description"`
+		Description any    `json:"description"`
+		Favicon     string `json:"favicon"`
 	}
 
 	var raw rawStatus
@@ -137,6 +139,7 @@ func parseJavaStatus(data []byte) (JavaStatus, error) {
 	}
 
 	motd := extractJavaDescription(raw.Description)
+	iconType, iconPNG := parseJavaFavicon(raw.Favicon)
 	return JavaStatus{
 		VersionName:     raw.Version.Name,
 		ProtocolVersion: raw.Version.Protocol,
@@ -144,6 +147,8 @@ func parseJavaStatus(data []byte) (JavaStatus, error) {
 		MaxPlayers:      raw.Players.Max,
 		MOTD:            motd,
 		CleanMOTD:       stripMCFormatting(motd),
+		IconPNG:         iconPNG,
+		IconType:        iconType,
 	}, nil
 }
 
@@ -161,6 +166,7 @@ func extractJavaDescription(desc any) string {
 }
 
 func appendDescriptionText(builder *strings.Builder, desc map[string]any) {
+	appendJavaFormatting(builder, desc)
 	if text, ok := desc["text"].(string); ok {
 		builder.WriteString(text)
 	}
@@ -174,4 +180,82 @@ func appendDescriptionText(builder *strings.Builder, desc map[string]any) {
 			}
 		}
 	}
+}
+
+func appendJavaFormatting(builder *strings.Builder, desc map[string]any) {
+	if colorName, ok := desc["color"].(string); ok {
+		if code := javaColorCode(colorName); code != 0 {
+			builder.WriteRune('\u00A7')
+			builder.WriteRune(code)
+		}
+	}
+	if value, ok := desc["bold"].(bool); ok && value {
+		builder.WriteString("\u00A7l")
+	}
+	if value, ok := desc["italic"].(bool); ok && value {
+		builder.WriteString("\u00A7o")
+	}
+	if value, ok := desc["underlined"].(bool); ok && value {
+		builder.WriteString("\u00A7n")
+	}
+	if value, ok := desc["strikethrough"].(bool); ok && value {
+		builder.WriteString("\u00A7m")
+	}
+}
+
+func javaColorCode(name string) rune {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "black":
+		return '0'
+	case "dark_blue":
+		return '1'
+	case "dark_green":
+		return '2'
+	case "dark_aqua":
+		return '3'
+	case "dark_red":
+		return '4'
+	case "dark_purple":
+		return '5'
+	case "gold":
+		return '6'
+	case "gray":
+		return '7'
+	case "dark_gray":
+		return '8'
+	case "blue":
+		return '9'
+	case "green":
+		return 'a'
+	case "aqua":
+		return 'b'
+	case "red":
+		return 'c'
+	case "light_purple":
+		return 'd'
+	case "yellow":
+		return 'e'
+	case "white":
+		return 'f'
+	default:
+		return 0
+	}
+}
+
+func parseJavaFavicon(value string) (string, []byte) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", nil
+	}
+	const marker = ";base64,"
+	parts := strings.SplitN(value, marker, 2)
+	if len(parts) != 2 {
+		return "", nil
+	}
+	iconType := strings.TrimPrefix(parts[0], "data:")
+	data, err := base64.StdEncoding.DecodeString(parts[1])
+	if err != nil {
+		return "", nil
+	}
+	return iconType, data
 }

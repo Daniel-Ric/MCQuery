@@ -21,3 +21,23 @@ func TestParseJavaStatusDescription(t *testing.T) {
 		t.Fatalf("unexpected players: %d/%d", status.CurrentPlayers, status.MaxPlayers)
 	}
 }
+
+func TestParseJavaStatusFormattingAndFavicon(t *testing.T) {
+	payload := []byte(`{"version":{"name":"1.20.4","protocol":765},"players":{"max":20,"online":5},"description":{"text":"Hello ","color":"red","extra":[{"text":"World","bold":true}]},"favicon":"data:image/png;base64,AQID"}`)
+	status, err := parseJavaStatus(payload)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if status.MOTD != "§cHello §lWorld" {
+		t.Fatalf("unexpected motd: %q", status.MOTD)
+	}
+	if status.CleanMOTD != "Hello World" {
+		t.Fatalf("unexpected clean motd: %q", status.CleanMOTD)
+	}
+	if status.IconType != "image/png" {
+		t.Fatalf("unexpected icon type: %s", status.IconType)
+	}
+	if len(status.IconPNG) != 3 {
+		t.Fatalf("expected decoded favicon bytes")
+	}
+}
