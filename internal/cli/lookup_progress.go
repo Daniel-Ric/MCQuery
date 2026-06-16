@@ -3,7 +3,6 @@ package cli
 import (
 	"fmt"
 	"math"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -29,7 +28,7 @@ type lookupProgressView struct {
 }
 
 func newLookupProgressView(settings Settings, config LookupConfig) *lookupProgressView {
-	total := countLookupSubdomains(config.Subdomains) * countLookupEndings(config.Endings)
+	total := countLookupSubdomains(config.Subdomains) * countLookupEndings(config.Endings) * maxInt(countLookupPorts(config), 1)
 	concurrency := resolveLookupConcurrency(settings.LookupConcurrency, total)
 	view := &lookupProgressView{
 		edition:     config.Edition,
@@ -150,48 +149,34 @@ func (v *lookupProgressView) Render(frame int) string {
 	if host == "" {
 		host = "Preparing next candidate"
 	}
-
-	percent := calculateLookupCompletion(progress.Completed, progress.Total)
-	estimatedTimeLine := fmt.Sprintf("Estimated time: %s • Elapsed: %s • Window: %s", etaText, formatLookupDuration(elapsed), formatLookupRate(windowRate))
-	if etaText != "calibrating" && etaText != "done" {
-		estimatedTimeLine = fmt.Sprintf("Estimated time: %s left • Elapsed: %s • Window: %s", etaText, formatLookupDuration(elapsed), formatLookupRate(windowRate))
+	port := "-"
+	if progress.Port > 0 {
+		port = fmt.Sprintf("%d", progress.Port)
 	}
 
+	percent := calculateLookupCompletion(progress.Completed, progress.Total)
+	estimatedTimeLine := fmt.Sprintf("%s | elapsed %s | rate %s", etaText, formatLookupDuration(elapsed), formatLookupRate(windowRate))
+	if etaText != "calibrating" && etaText != "done" {
+		estimatedTimeLine = fmt.Sprintf("%s left | elapsed %s | rate %s", etaText, formatLookupDuration(elapsed), formatLookupRate(windowRate))
+	}
+
+	progressLine := fmt.Sprintf("Progress: %s %s/%s (%.1f%%)", buildLookupProgressBar(progress.Completed, progress.Total, frame, progressBarWidth()), formatLookupNumber(progress.Completed), formatLookupNumber(progress.Total), percent)
+	if terminalWidth() < 54 {
+		progressLine = fmt.Sprintf("Progress: %s %.1f%%", buildLookupProgressBar(progress.Completed, progress.Total, frame, progressBarWidth()), percent)
+	}
 	lines := []string{
-		fmt.Sprintf("%s %s/%s (%.1f%%)", buildLookupProgressBar(progress.Completed, progress.Total, frame, 28), formatLookupNumber(progress.Completed), formatLookupNumber(progress.Total), percent),
-		estimatedTimeLine,
-		fmt.Sprintf("Pipeline: %d workers • %s remaining • Confidence: %s", concurrency, formatLookupNumber(remaining), lookupConfidence(progress.Completed, progress.Total)),
-		fmt.Sprintf("Stage: %s • Rate cap: %s", lookupStage(progress.Completed, progress.Total), formatLookupRateCap(rateLimit)),
-		fmt.Sprintf("Subdomain: %s", subdomain),
-		fmt.Sprintf("Ending: %s", ending),
-		fmt.Sprintf("Host: %s", host),
+		progressLine,
+		fmt.Sprintf("ETA: %s", estimatedTimeLine),
+		fmt.Sprintf("Pipeline: %d workers | %s remaining | %s cap", concurrency, formatLookupNumber(remaining), formatLookupRateCap(rateLimit)),
+		fmt.Sprintf("Stage: %s | confidence %s", lookupStage(progress.Completed, progress.Total), lookupConfidence(progress.Completed, progress.Total)),
+		fmt.Sprintf("Target: %s:%s", host, port),
+		fmt.Sprintf("Pattern: subdomain %s | ending %s", subdomain, ending),
 	}
 	return strings.Join(lines, "\n")
 }
 
 func buildLookupProgressBar(completed, total, frame, width int) string {
-	if total <= 0 || width <= 0 {
-		return "[----------------------------]"
-	}
-	if completed > total {
-		completed = total
-	}
-	filled := (completed * width) / total
-	if filled > width {
-		filled = width
-	}
-	bar := make([]rune, width)
-	for i := 0; i < width; i++ {
-		bar[i] = '░'
-	}
-	for i := 0; i < filled; i++ {
-		bar[i] = '█'
-	}
-	if completed < total && filled < width {
-		animation := []rune{'▏', '▎', '▍', '▌', '▋', '▊', '▉'}
-		bar[filled] = animation[frame%len(animation)]
-	}
-	return fmt.Sprintf("[%s]", string(bar))
+	return renderProgressBar(completed, total, frame, width)
 }
 
 func resolveLookupConcurrency(configured, total int) int {
@@ -199,10 +184,7 @@ func resolveLookupConcurrency(configured, total int) int {
 		return 0
 	}
 	if configured <= 0 {
-		configured = runtime.NumCPU() * 8
-		if configured < 32 {
-			configured = 32
-		}
+		return ping.DefaultLookupConcurrency(total)
 	}
 	if configured > total {
 		configured = total
