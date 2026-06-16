@@ -13,6 +13,7 @@ import (
 type LookupConfig struct {
 	Edition       Edition
 	Port          int
+	Ports         []int
 	BaseHost      string
 	Subdomains    []string
 	DomainEndings []string
@@ -20,10 +21,12 @@ type LookupConfig struct {
 	RateLimit     int
 	Options       ExecuteOptions
 	Progress      func(progress LookupProgress)
+	Paused        func() bool
 }
 
 type LookupMatch struct {
 	Host   string
+	Port   int
 	Result Result
 	Detail ExecuteDetails
 }
@@ -38,6 +41,7 @@ type LookupProgress struct {
 	Subdomain string
 	Ending    string
 	Host      string
+	Port      int
 	Attempt   int
 	Total     int
 	Completed int
@@ -47,7 +51,32 @@ type lookupCandidate struct {
 	subdomain string
 	ending    string
 	host      string
+	port      int
 	attempt   int
+}
+
+const (
+	lookupAutoWorkersPerCPU = 16
+	lookupAutoWorkersMin    = 64
+)
+
+func AutoLookupConcurrencyTarget() int {
+	concurrency := runtime.NumCPU() * lookupAutoWorkersPerCPU
+	if concurrency < lookupAutoWorkersMin {
+		concurrency = lookupAutoWorkersMin
+	}
+	return concurrency
+}
+
+func DefaultLookupConcurrency(total int) int {
+	if total <= 0 {
+		return 0
+	}
+	concurrency := AutoLookupConcurrencyTarget()
+	if concurrency > total {
+		return total
+	}
+	return concurrency
 }
 
 func LookupDomains(ctx context.Context, config LookupConfig) (LookupResult, error) {
@@ -64,18 +93,15 @@ func LookupDomains(ctx context.Context, config LookupConfig) (LookupResult, erro
 	if len(subdomains) == 0 {
 		subdomains = []string{""}
 	}
+	ports := normalizeLookupPorts(config.Port, config.Ports)
 
-	total := len(subdomains) * len(endings)
+	total := len(subdomains) * len(endings) * len(ports)
 	if total == 0 {
 		return LookupResult{}, fmt.Errorf("no combinations available")
 	}
 	concurrency := config.Concurrency
 	if concurrency <= 0 {
-		base := runtime.NumCPU() * 8
-		if base < 32 {
-			base = 32
-		}
-		concurrency = base
+		concurrency = DefaultLookupConcurrency(total)
 	}
 	if concurrency > total {
 		concurrency = total
@@ -109,7 +135,7 @@ func LookupDomains(ctx context.Context, config LookupConfig) (LookupResult, erro
 			res, detail, err := Execute(ctx, ExecuteConfig{
 				Edition:    config.Edition,
 				Host:       candidate.host,
-				Port:       config.Port,
+				Port:       candidate.port,
 				Timeout:    config.Options.Timeout,
 				RetryCount: config.Options.RetryCount,
 				RetryDelay: config.Options.RetryDelay,
@@ -122,6 +148,7 @@ func LookupDomains(ctx context.Context, config LookupConfig) (LookupResult, erro
 					Subdomain: candidate.subdomain,
 					Ending:    candidate.ending,
 					Host:      candidate.host,
+					Port:      candidate.port,
 					Attempt:   candidate.attempt,
 					Total:     total,
 					Completed: currentCompleted,
@@ -133,7 +160,7 @@ func LookupDomains(ctx context.Context, config LookupConfig) (LookupResult, erro
 			select {
 			case <-ctx.Done():
 				return
-			case results <- LookupMatch{Host: candidate.host, Result: res, Detail: detail}:
+			case results <- LookupMatch{Host: candidate.host, Port: candidate.port, Result: res, Detail: detail}:
 			}
 		}
 	}
@@ -144,7 +171,7 @@ func LookupDomains(ctx context.Context, config LookupConfig) (LookupResult, erro
 	}
 
 	go func() {
-		enqueueLookupCandidates(ctx, candidates, subdomains, endings, baseHost, limiter)
+		enqueueLookupCandidates(ctx, candidates, subdomains, endings, ports, baseHost, limiter, config.Paused)
 	}()
 
 	go func() {
@@ -162,6 +189,25 @@ func LookupDomains(ctx context.Context, config LookupConfig) (LookupResult, erro
 		Attempts:  total,
 		Completed: int(atomic.LoadInt64(&completed)),
 	}, ctx.Err()
+}
+
+func normalizeLookupPorts(defaultPort int, values []int) []int {
+	seen := make(map[int]struct{}, len(values)+1)
+	list := make([]int, 0, len(values)+1)
+	for _, value := range values {
+		if value < 1 || value > 65535 {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		list = append(list, value)
+	}
+	if len(list) == 0 && defaultPort >= 1 && defaultPort <= 65535 {
+		list = append(list, defaultPort)
+	}
+	return list
 }
 
 func normalizeSubdomains(values []string) []string {
@@ -216,32 +262,45 @@ func buildHost(subdomain, baseHost, ending string) string {
 	return strings.Join(parts, ".")
 }
 
-func enqueueLookupCandidates(ctx context.Context, candidates chan<- lookupCandidate, subdomains, endings []string, baseHost string, limiter <-chan time.Time) {
+func enqueueLookupCandidates(ctx context.Context, candidates chan<- lookupCandidate, subdomains, endings []string, ports []int, baseHost string, limiter <-chan time.Time, paused func() bool) {
 	defer close(candidates)
 
 	attempt := 0
 	for _, sub := range subdomains {
 		for _, ending := range endings {
-			attempt++
-			if limiter != nil {
+			host := buildHost(sub, baseHost, ending)
+			for _, port := range ports {
+				attempt++
+				if paused != nil {
+					for paused() {
+						select {
+						case <-ctx.Done():
+							return
+						case <-time.After(120 * time.Millisecond):
+						}
+					}
+				}
+				if limiter != nil {
+					select {
+					case <-ctx.Done():
+						return
+					case <-limiter:
+					}
+				}
+
+				candidate := lookupCandidate{
+					subdomain: sub,
+					ending:    ending,
+					host:      host,
+					port:      port,
+					attempt:   attempt,
+				}
+
 				select {
 				case <-ctx.Done():
 					return
-				case <-limiter:
+				case candidates <- candidate:
 				}
-			}
-
-			candidate := lookupCandidate{
-				subdomain: sub,
-				ending:    ending,
-				host:      buildHost(sub, baseHost, ending),
-				attempt:   attempt,
-			}
-
-			select {
-			case <-ctx.Done():
-				return
-			case candidates <- candidate:
 			}
 		}
 	}
