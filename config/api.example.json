@@ -1,0 +1,7 @@
+{
+  "addr": "127.0.0.1:8080",
+  "timeout_ms": 1000,
+  "concurrency": 32,
+  "enable_srv": true,
+  "ip_mode": "auto"
+}
