@@ -38,7 +38,7 @@ func executeJava(ctx context.Context, config ExecuteConfig) (Result, ExecuteDeta
 	details.SelectedIP = selectedIP
 	details.ResolvedIPs = resolved
 
-	status, err := PingJava(ctx, selectedIP, config.Host, dialPort)
+	status, err := PingJava(ctx, selectedIP, config.Host, dialPort, config.SkipJavaLatency)
 	if err != nil {
 		return nil, details, err
 	}

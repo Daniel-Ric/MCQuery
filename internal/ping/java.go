@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-func PingJava(ctx context.Context, dialHost string, handshakeHost string, port int) (JavaStatus, error) {
+func PingJava(ctx context.Context, dialHost string, handshakeHost string, port int, skipLatency bool) (JavaStatus, error) {
 	addr := net.JoinHostPort(dialHost, strconv.Itoa(port))
 	dialer := &net.Dialer{}
 	conn, err := dialer.DialContext(ctx, "tcp", addr)
@@ -60,11 +60,13 @@ func PingJava(ctx context.Context, dialHost string, handshakeHost string, port i
 		return JavaStatus{}, err
 	}
 
-	latency, err := pingJavaLatency(conn)
-	if err != nil {
-		return JavaStatus{}, err
+	if !skipLatency {
+		latency, err := pingJavaLatency(conn)
+		if err != nil {
+			return JavaStatus{}, err
+		}
+		status.LatencyMillis = latency
 	}
-	status.LatencyMillis = latency
 
 	return status, nil
 }

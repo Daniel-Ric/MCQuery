@@ -13,14 +13,15 @@ type Result interface {
 }
 
 type ExecuteConfig struct {
-	Edition    Edition
-	Host       string
-	Port       int
-	Timeout    time.Duration
-	RetryCount int
-	RetryDelay time.Duration
-	EnableSRV  bool
-	IPMode     IPMode
+	Edition         Edition
+	Host            string
+	Port            int
+	Timeout         time.Duration
+	RetryCount      int
+	RetryDelay      time.Duration
+	EnableSRV       bool
+	IPMode          IPMode
+	SkipJavaLatency bool
 }
 
 type ExecuteOptions struct {
