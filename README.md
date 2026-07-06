@@ -17,6 +17,7 @@
 - [Usage](#usage)
   - [Direct Query (UWP/TCP)](#direct-query-uwptcp)
   - [IP/Domain Lookup](#ipdomain-lookup)
+  - [Status API](#status-api)
 - [Output Details](#output-details)
 - [Directory Layout](#directory-layout)
 - [Troubleshooting](#troubleshooting)
@@ -59,6 +60,22 @@ Or run directly:
 go run ./cmd/uwp-tcp-con
 ```
 
+Start the API server:
+
+```bash
+go run ./cmd/uwp-tcp-con --api --api-addr 127.0.0.1:8080 --api-timeout-ms 1000 --api-concurrency 32
+```
+
+Or use the quickstart scripts:
+
+```powershell
+.\scripts\start-api.ps1
+```
+
+```cmd
+scripts\start-api.cmd
+```
+
 ---
 
 ## Usage
@@ -90,6 +107,64 @@ This sends the protocol-specific ping and renders a formatted status page.
 
 The lookup will probe each combination concurrently and report matches.
 
+### Status API
+
+The API keeps the normal CLI untouched and adds fast JSON/SSE endpoints for dashboards, bots, and tools that need player counts from one or more servers at the same time.
+
+Start it with:
+
+```bash
+./uwp-tcp-con --api --api-addr 127.0.0.1:8080
+```
+
+Or from a config file:
+
+```bash
+./uwp-tcp-con --api-config config/api.example.json
+```
+
+For local changes, copy `config/api.example.json` to `config/api.local.json`. The quickstart scripts will use `api.local.json` automatically when it exists.
+
+Config fields:
+
+```json
+{
+  "addr": "127.0.0.1:8080",
+  "timeout_ms": 1000,
+  "concurrency": 32,
+  "enable_srv": true,
+  "ip_mode": "auto"
+}
+```
+
+Single server snapshot:
+
+```bash
+curl "http://127.0.0.1:8080/api/status?edition=bedrock&host=play.example.com&port=19132&timeout_ms=1000"
+```
+
+Group snapshot with parallel queries:
+
+```bash
+curl "http://127.0.0.1:8080/api/status?server=bedrock,play.example.com,19132,lobby&server=java,mc.example.com,25565,survival&timeout_ms=1000&concurrency=32"
+```
+
+Group snapshot via JSON:
+
+```bash
+curl -X POST "http://127.0.0.1:8080/api/status" \
+  -H "Content-Type: application/json" \
+  -d "{\"timeout_ms\":1000,\"concurrency\":32,\"servers\":[{\"name\":\"lobby\",\"edition\":\"bedrock\",\"host\":\"play.example.com\",\"port\":19132},{\"name\":\"survival\",\"edition\":\"java\",\"host\":\"mc.example.com\",\"port\":25565}]}"
+```
+
+Live stream:
+
+```bash
+curl "http://127.0.0.1:8080/api/stream?server=bedrock,play.example.com,19132,lobby&server=java,mc.example.com,25565,survival&interval_ms=1000&timeout_ms=1000"
+```
+
+The stream uses Server-Sent Events and sends a fresh grouped status payload every interval.
+
 ---
 
 ## Output Details
@@ -107,8 +182,11 @@ Both editions include a **clean MOTD** with Minecraft formatting stripped.
 
 ```
 cmd/uwp-tcp-con/     # CLI entrypoint
+config/              # API quickstart config
 internal/cli/        # terminal UI, prompts, lookup pools
 internal/ping/       # Bedrock/Java protocols + lookup engine
+internal/web/        # local link server and status API
+scripts/             # quickstart launch scripts
 ```
 
 ---
