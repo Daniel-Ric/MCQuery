@@ -2,10 +2,10 @@
 
 > **Go (1.25+)** terminal app for querying Minecraft **Bedrock** and **Java** servers directly or via an interactive **domain lookup** mode. Includes raw-terminal navigation, spinner progress UI, and concurrency-aware host probing.
 
-[![Runtime](https://img.shields.io/badge/runtime-Go_1.25%2B-00ADD8?logo=go)](#)
-[![Type](https://img.shields.io/badge/type-CLI-000)](#)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-informational)](#)
-[![Status](https://img.shields.io/badge/stability-stable-success)](#)
+![Runtime](https://img.shields.io/badge/runtime-Go_1.25%2B-00ADD8?logo=go)
+![Type](https://img.shields.io/badge/type-CLI-000)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-informational)
+![Status](https://img.shields.io/badge/stability-stable-success)
 
 ---
 

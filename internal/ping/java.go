@@ -21,7 +21,9 @@ func PingJava(ctx context.Context, dialHost string, handshakeHost string, port i
 	if err != nil {
 		return JavaStatus{}, err
 	}
-	defer conn.Close()
+	defer func() {
+		_ = conn.Close()
+	}()
 
 	if deadline, ok := ctx.Deadline(); ok {
 		_ = conn.SetDeadline(deadline)
