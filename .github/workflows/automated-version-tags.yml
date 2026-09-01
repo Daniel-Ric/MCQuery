@@ -1,0 +1,92 @@
+name: Automated Version Tags
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: automated-version-tags-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    if: >-
+      ${{
+        github.event_name == 'workflow_dispatch' ||
+        (
+          github.actor != 'github-actions[bot]' &&
+          github.actor != 'dependabot[bot]' &&
+          github.event.head_commit.author.username != 'dependabot[bot]' &&
+          !contains(github.event.head_commit.message, '[skip release]') &&
+          !contains(github.event.head_commit.message, 'dependabot/')
+        )
+      }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Tests
+        run: go test ./...
+
+      - name: Build
+        run: go build ./cmd/uwp-tcp-con
+
+  release:
+    if: >-
+      ${{
+        github.event_name == 'workflow_dispatch' ||
+        (
+          github.actor != 'github-actions[bot]' &&
+          github.actor != 'dependabot[bot]' &&
+          github.event.head_commit.author.username != 'dependabot[bot]' &&
+          !contains(github.event.head_commit.message, '[skip release]') &&
+          !contains(github.event.head_commit.message, 'dependabot/')
+        )
+      }}
+    needs: validate
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.publish.outputs.tag }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Create version tag and GitHub release
+        id: publish
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: node .github/scripts/create-version-release.js
+
+  windows-executable:
+    needs: release
+    if: ${{ needs.release.result == 'success' && needs.release.outputs.tag != '' }}
+    uses: ./.github/workflows/windows-executable.yml
+    with:
+      tag: ${{ needs.release.outputs.tag }}
+    secrets: inherit
