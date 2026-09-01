@@ -314,7 +314,8 @@ func formatBatchResults(title string, results []batchRunResult, parseErrors []st
 	builder.WriteString("\n")
 
 	builder.WriteString("Results\n")
-	for _, result := range results {
+	for i, result := range results {
+		writeResultEntryDivider(&builder, i)
 		entry := result.Entry
 		if result.Err != nil {
 			builder.WriteString(fmt.Sprintf("[ERR] %s %s:%d - %s\n", entry.Edition, entry.Host, entry.Port, result.Err))
@@ -335,7 +336,7 @@ func formatBatchResults(title string, results []batchRunResult, parseErrors []st
 func compactResultStatus(result ping.Result) string {
 	switch value := result.(type) {
 	case ping.BedrockPong:
-		return fmt.Sprintf("%s players %s/%s", value.GameVersion, value.CurrentPlayers, value.MaxPlayers)
+		return fmt.Sprintf("%s players %s/%s latency %dms", value.GameVersion, value.CurrentPlayers, value.MaxPlayers, value.LatencyMillis)
 	case ping.JavaStatus:
 		return fmt.Sprintf("%s players %d/%d latency %dms", value.VersionName, value.CurrentPlayers, value.MaxPlayers, value.LatencyMillis)
 	case nil:

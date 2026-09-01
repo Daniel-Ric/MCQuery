@@ -27,27 +27,47 @@ type exportPayload struct {
 }
 
 type exportRecord struct {
-	Mode            string   `json:"mode"`
-	Edition         string   `json:"edition"`
-	Host            string   `json:"host"`
-	Port            int      `json:"port"`
-	Success         bool     `json:"success"`
-	Error           string   `json:"error,omitempty"`
-	MOTD            string   `json:"motd,omitempty"`
-	CleanMOTD       string   `json:"clean_motd,omitempty"`
-	Version         string   `json:"version,omitempty"`
-	Protocol        string   `json:"protocol,omitempty"`
-	PlayersOnline   int      `json:"players_online,omitempty"`
-	PlayersMax      int      `json:"players_max,omitempty"`
-	LatencyMillis   int64    `json:"latency_ms,omitempty"`
-	SelectedIP      string   `json:"selected_ip,omitempty"`
-	ResolvedIPs     []string `json:"resolved_ips,omitempty"`
-	SRVUsed         bool     `json:"srv_used,omitempty"`
-	SRVHost         string   `json:"srv_host,omitempty"`
-	SRVPort         int      `json:"srv_port,omitempty"`
-	AddURL          string   `json:"add_url,omitempty"`
-	ConnectURL      string   `json:"connect_url,omitempty"`
-	JavaIconSavedTo string   `json:"java_icon_saved_to,omitempty"`
+	Mode                string            `json:"mode"`
+	Edition             string            `json:"edition"`
+	Host                string            `json:"host"`
+	Port                int               `json:"port"`
+	Success             bool              `json:"success"`
+	Error               string            `json:"error,omitempty"`
+	MOTD                string            `json:"motd,omitempty"`
+	CleanMOTD           string            `json:"clean_motd,omitempty"`
+	SubMOTD             string            `json:"sub_motd,omitempty"`
+	Version             string            `json:"version,omitempty"`
+	Protocol            string            `json:"protocol,omitempty"`
+	PlayersOnline       int               `json:"players_online,omitempty"`
+	PlayersMax          int               `json:"players_max,omitempty"`
+	PlayerSample        []ping.JavaPlayer `json:"player_sample,omitempty"`
+	LatencyMillis       int64             `json:"latency_ms,omitempty"`
+	ServerID            string            `json:"server_id,omitempty"`
+	ServerGUID          uint64            `json:"server_guid,omitempty"`
+	GameMode            string            `json:"game_mode,omitempty"`
+	GameModeNumeric     string            `json:"game_mode_numeric,omitempty"`
+	AdvertisedIPv4Port  int               `json:"advertised_ipv4_port,omitempty"`
+	AdvertisedIPv6Port  int               `json:"advertised_ipv6_port,omitempty"`
+	EnforcesSecureChat  *bool             `json:"enforces_secure_chat,omitempty"`
+	PreviewsChat        *bool             `json:"previews_chat,omitempty"`
+	PreventsChatReports *bool             `json:"prevents_chat_reports,omitempty"`
+	ModLoader           string            `json:"mod_loader,omitempty"`
+	Mods                []ping.JavaMod    `json:"mods,omitempty"`
+	ModChannels         int               `json:"mod_channels,omitempty"`
+	ModDataTruncated    bool              `json:"mod_data_truncated,omitempty"`
+	IconType            string            `json:"icon_type,omitempty"`
+	IconWidth           int               `json:"icon_width,omitempty"`
+	IconHeight          int               `json:"icon_height,omitempty"`
+	ResponseBytes       int               `json:"response_bytes,omitempty"`
+	ExtraFields         []string          `json:"extra_fields,omitempty"`
+	SelectedIP          string            `json:"selected_ip,omitempty"`
+	ResolvedIPs         []string          `json:"resolved_ips,omitempty"`
+	SRVUsed             bool              `json:"srv_used,omitempty"`
+	SRVHost             string            `json:"srv_host,omitempty"`
+	SRVPort             int               `json:"srv_port,omitempty"`
+	AddURL              string            `json:"add_url,omitempty"`
+	ConnectURL          string            `json:"connect_url,omitempty"`
+	JavaIconSavedTo     string            `json:"java_icon_saved_to,omitempty"`
 }
 
 func isValidExportFormat(value string) bool {
@@ -149,7 +169,27 @@ func writeCSVExport(writer *csv.Writer, records []exportRecord) error {
 		"protocol",
 		"players_online",
 		"players_max",
+		"player_sample",
 		"latency_ms",
+		"sub_motd",
+		"server_id",
+		"server_guid",
+		"game_mode",
+		"game_mode_numeric",
+		"advertised_ipv4_port",
+		"advertised_ipv6_port",
+		"enforces_secure_chat",
+		"previews_chat",
+		"prevents_chat_reports",
+		"mod_loader",
+		"mods",
+		"mod_channels",
+		"mod_data_truncated",
+		"icon_type",
+		"icon_width",
+		"icon_height",
+		"response_bytes",
+		"extra_fields",
 		"selected_ip",
 		"resolved_ips",
 		"srv_used",
@@ -176,7 +216,27 @@ func writeCSVExport(writer *csv.Writer, records []exportRecord) error {
 			record.Protocol,
 			intString(record.PlayersOnline),
 			intString(record.PlayersMax),
+			formatExportPlayers(record.PlayerSample),
 			int64String(record.LatencyMillis),
+			record.SubMOTD,
+			record.ServerID,
+			uint64String(record.ServerGUID),
+			record.GameMode,
+			record.GameModeNumeric,
+			intString(record.AdvertisedIPv4Port),
+			intString(record.AdvertisedIPv6Port),
+			boolPointerString(record.EnforcesSecureChat),
+			boolPointerString(record.PreviewsChat),
+			boolPointerString(record.PreventsChatReports),
+			record.ModLoader,
+			formatExportMods(record.Mods),
+			intString(record.ModChannels),
+			strconv.FormatBool(record.ModDataTruncated),
+			record.IconType,
+			intString(record.IconWidth),
+			intString(record.IconHeight),
+			intString(record.ResponseBytes),
+			strings.Join(record.ExtraFields, ";"),
 			record.SelectedIP,
 			strings.Join(record.ResolvedIPs, ";"),
 			strconv.FormatBool(record.SRVUsed),
@@ -205,6 +265,44 @@ func int64String(value int64) string {
 		return ""
 	}
 	return strconv.FormatInt(value, 10)
+}
+
+func uint64String(value uint64) string {
+	if value == 0 {
+		return ""
+	}
+	return strconv.FormatUint(value, 10)
+}
+
+func boolPointerString(value *bool) string {
+	if value == nil {
+		return ""
+	}
+	return strconv.FormatBool(*value)
+}
+
+func formatExportPlayers(players []ping.JavaPlayer) string {
+	values := make([]string, 0, len(players))
+	for _, player := range players {
+		value := player.Name
+		if player.ID != "" {
+			value += " (" + player.ID + ")"
+		}
+		values = append(values, value)
+	}
+	return strings.Join(values, ";")
+}
+
+func formatExportMods(mods []ping.JavaMod) string {
+	values := make([]string, 0, len(mods))
+	for _, mod := range mods {
+		value := mod.ID
+		if mod.Version != "" {
+			value += "@" + mod.Version
+		}
+		values = append(values, value)
+	}
+	return strings.Join(values, ";")
 }
 
 func (a *App) exportPath(ext string) (string, error) {
@@ -252,10 +350,20 @@ func newExportRecord(mode string, edition ping.Edition, host string, port int, r
 	case ping.BedrockPong:
 		record.MOTD = value.MOTD
 		record.CleanMOTD = value.CleanMOTD
+		record.SubMOTD = value.SubMOTD
 		record.Version = value.GameVersion
 		record.Protocol = value.ProtocolVersion
 		record.PlayersOnline = parseCount(value.CurrentPlayers)
 		record.PlayersMax = parseCount(value.MaxPlayers)
+		record.LatencyMillis = value.LatencyMillis
+		record.ServerID = value.ServerID
+		record.ServerGUID = value.ServerGUID
+		record.GameMode = value.GameMode
+		record.GameModeNumeric = value.GameModeNumeric
+		record.AdvertisedIPv4Port = value.AdvertisedIPv4Port
+		record.AdvertisedIPv6Port = value.AdvertisedIPv6Port
+		record.ResponseBytes = value.ResponseBytes
+		record.ExtraFields = append([]string(nil), value.ExtraFields...)
 	case ping.JavaStatus:
 		record.MOTD = value.MOTD
 		record.CleanMOTD = value.CleanMOTD
@@ -263,7 +371,20 @@ func newExportRecord(mode string, edition ping.Edition, host string, port int, r
 		record.Protocol = strconv.Itoa(value.ProtocolVersion)
 		record.PlayersOnline = value.CurrentPlayers
 		record.PlayersMax = value.MaxPlayers
+		record.PlayerSample = append([]ping.JavaPlayer(nil), value.PlayerSample...)
 		record.LatencyMillis = value.LatencyMillis
+		record.EnforcesSecureChat = value.EnforcesSecureChat
+		record.PreviewsChat = value.PreviewsChat
+		record.PreventsChatReports = value.PreventsChatReports
+		record.ModLoader = value.ModLoader
+		record.Mods = append([]ping.JavaMod(nil), value.Mods...)
+		record.ModChannels = value.ModChannels
+		record.ModDataTruncated = value.ModDataTruncated
+		record.IconType = value.IconType
+		record.IconWidth = value.IconWidth
+		record.IconHeight = value.IconHeight
+		record.ResponseBytes = value.StatusJSONBytes
+		record.ExtraFields = append([]string(nil), value.ExtraFields...)
 	}
 	return record
 }
