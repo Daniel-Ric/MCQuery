@@ -7,8 +7,10 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"image/png"
 	"io"
 	"net"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -132,28 +134,118 @@ func parseJavaStatus(data []byte) (JavaStatus, error) {
 		Players struct {
 			Max    int `json:"max"`
 			Online int `json:"online"`
+			Sample []struct {
+				Name string `json:"name"`
+				ID   string `json:"id"`
+			} `json:"sample"`
 		} `json:"players"`
-		Description any    `json:"description"`
-		Favicon     string `json:"favicon"`
+		Description         any    `json:"description"`
+		Favicon             string `json:"favicon"`
+		EnforcesSecureChat  *bool  `json:"enforcesSecureChat"`
+		PreviewsChat        *bool  `json:"previewsChat"`
+		PreventsChatReports *bool  `json:"preventsChatReports"`
+		ModInfo             struct {
+			Type    string `json:"type"`
+			ModList []struct {
+				ID      string `json:"modid"`
+				Version string `json:"version"`
+			} `json:"modList"`
+		} `json:"modinfo"`
+		ForgeData *struct {
+			Channels []json.RawMessage `json:"channels"`
+			Mods     []struct {
+				ID       string `json:"modId"`
+				LegacyID string `json:"modid"`
+				Marker   string `json:"modmarker"`
+				Version  string `json:"version"`
+			} `json:"mods"`
+			Truncated         bool `json:"truncated"`
+			FMLNetworkVersion int  `json:"fmlNetworkVersion"`
+		} `json:"forgeData"`
 	}
 
 	var raw rawStatus
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return JavaStatus{}, err
 	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return JavaStatus{}, err
+	}
 
 	motd := extractJavaDescription(raw.Description)
-	iconType, iconPNG := parseJavaFavicon(raw.Favicon)
+	iconType, iconPNG, iconWidth, iconHeight := parseJavaFavicon(raw.Favicon)
+	players := make([]JavaPlayer, 0, len(raw.Players.Sample))
+	for _, player := range raw.Players.Sample {
+		players = append(players, JavaPlayer{Name: player.Name, ID: player.ID})
+	}
+	mods := make([]JavaMod, 0, len(raw.ModInfo.ModList))
+	for _, mod := range raw.ModInfo.ModList {
+		mods = append(mods, JavaMod{ID: mod.ID, Version: mod.Version})
+	}
+	modLoader := strings.TrimSpace(raw.ModInfo.Type)
+	modChannels := 0
+	modDataTruncated := false
+	if raw.ForgeData != nil {
+		modLoader = "Forge/FML"
+		if raw.ForgeData.FMLNetworkVersion > 0 {
+			modLoader = fmt.Sprintf("Forge/FML network %d", raw.ForgeData.FMLNetworkVersion)
+		}
+		for _, mod := range raw.ForgeData.Mods {
+			id := strings.TrimSpace(mod.ID)
+			if id == "" {
+				id = strings.TrimSpace(mod.LegacyID)
+			}
+			version := strings.TrimSpace(mod.Version)
+			if version == "" {
+				version = strings.TrimSpace(mod.Marker)
+			}
+			if id != "" {
+				mods = append(mods, JavaMod{ID: id, Version: version})
+			}
+		}
+		modChannels = len(raw.ForgeData.Channels)
+		modDataTruncated = raw.ForgeData.Truncated
+	}
+	extraFields := javaStatusExtraFields(fields)
 	return JavaStatus{
-		VersionName:     raw.Version.Name,
-		ProtocolVersion: raw.Version.Protocol,
-		CurrentPlayers:  raw.Players.Online,
-		MaxPlayers:      raw.Players.Max,
-		MOTD:            motd,
-		CleanMOTD:       stripMCFormatting(motd),
-		IconPNG:         iconPNG,
-		IconType:        iconType,
+		VersionName:         raw.Version.Name,
+		ProtocolVersion:     raw.Version.Protocol,
+		CurrentPlayers:      raw.Players.Online,
+		MaxPlayers:          raw.Players.Max,
+		PlayerSample:        players,
+		MOTD:                motd,
+		CleanMOTD:           stripMCFormatting(motd),
+		IconPNG:             iconPNG,
+		IconType:            iconType,
+		IconWidth:           iconWidth,
+		IconHeight:          iconHeight,
+		EnforcesSecureChat:  raw.EnforcesSecureChat,
+		PreviewsChat:        raw.PreviewsChat,
+		PreventsChatReports: raw.PreventsChatReports,
+		ModLoader:           modLoader,
+		Mods:                mods,
+		ModChannels:         modChannels,
+		ModDataTruncated:    modDataTruncated,
+		StatusJSONBytes:     len(data),
+		ExtraFields:         extraFields,
 	}, nil
+}
+
+func javaStatusExtraFields(fields map[string]json.RawMessage) []string {
+	known := map[string]struct{}{
+		"version": {}, "players": {}, "description": {}, "favicon": {},
+		"enforcesSecureChat": {}, "previewsChat": {}, "preventsChatReports": {},
+		"modinfo": {}, "forgeData": {},
+	}
+	extra := make([]string, 0)
+	for field := range fields {
+		if _, ok := known[field]; !ok {
+			extra = append(extra, field)
+		}
+	}
+	sort.Strings(extra)
+	return extra
 }
 
 func extractJavaDescription(desc any) string {
@@ -164,6 +256,12 @@ func extractJavaDescription(desc any) string {
 		var builder strings.Builder
 		appendDescriptionText(&builder, v)
 		return builder.String()
+	case []any:
+		var builder strings.Builder
+		for _, item := range v {
+			appendJavaDescriptionValue(&builder, item)
+		}
+		return builder.String()
 	default:
 		return ""
 	}
@@ -173,15 +271,32 @@ func appendDescriptionText(builder *strings.Builder, desc map[string]any) {
 	appendJavaFormatting(builder, desc)
 	if text, ok := desc["text"].(string); ok {
 		builder.WriteString(text)
+	} else if fallback, ok := desc["fallback"].(string); ok {
+		builder.WriteString(fallback)
+	} else if translate, ok := desc["translate"].(string); ok {
+		builder.WriteString(translate)
+	}
+	if with, ok := desc["with"].([]any); ok {
+		for _, item := range with {
+			appendJavaDescriptionValue(builder, item)
+		}
 	}
 	if extra, ok := desc["extra"].([]any); ok {
 		for _, item := range extra {
-			switch itemValue := item.(type) {
-			case string:
-				builder.WriteString(itemValue)
-			case map[string]any:
-				appendDescriptionText(builder, itemValue)
-			}
+			appendJavaDescriptionValue(builder, item)
+		}
+	}
+}
+
+func appendJavaDescriptionValue(builder *strings.Builder, value any) {
+	switch item := value.(type) {
+	case string:
+		builder.WriteString(item)
+	case map[string]any:
+		appendDescriptionText(builder, item)
+	case []any:
+		for _, nested := range item {
+			appendJavaDescriptionValue(builder, nested)
 		}
 	}
 }
@@ -246,20 +361,27 @@ func javaColorCode(name string) rune {
 	}
 }
 
-func parseJavaFavicon(value string) (string, []byte) {
+func parseJavaFavicon(value string) (string, []byte, int, int) {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return "", nil
+		return "", nil, 0, 0
 	}
 	const marker = ";base64,"
 	parts := strings.SplitN(value, marker, 2)
 	if len(parts) != 2 {
-		return "", nil
+		return "", nil, 0, 0
 	}
 	iconType := strings.TrimPrefix(parts[0], "data:")
 	data, err := base64.StdEncoding.DecodeString(parts[1])
 	if err != nil {
-		return "", nil
+		return "", nil, 0, 0
 	}
-	return iconType, data
+	width, height := 0, 0
+	if strings.EqualFold(iconType, "image/png") {
+		if config, err := png.DecodeConfig(bytes.NewReader(data)); err == nil {
+			width = config.Width
+			height = config.Height
+		}
+	}
+	return iconType, data, width, height
 }

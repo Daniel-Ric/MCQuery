@@ -194,6 +194,8 @@ func lookupPlayerCounts(result ping.Result) (int, int) {
 
 func lookupLatency(result ping.Result) int64 {
 	switch value := result.(type) {
+	case ping.BedrockPong:
+		return value.LatencyMillis
 	case ping.JavaStatus:
 		return value.LatencyMillis
 	default:

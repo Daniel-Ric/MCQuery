@@ -14,25 +14,59 @@ const (
 )
 
 type BedrockPong struct {
-	GameID          string
-	MOTD            string
-	ProtocolVersion string
-	GameVersion     string
-	CurrentPlayers  string
-	MaxPlayers      string
-	CleanMOTD       string
+	GameID             string
+	MOTD               string
+	CleanMOTD          string
+	ProtocolVersion    string
+	GameVersion        string
+	CurrentPlayers     string
+	MaxPlayers         string
+	ServerID           string
+	ServerGUID         uint64
+	SubMOTD            string
+	CleanSubMOTD       string
+	GameMode           string
+	GameModeNumeric    string
+	AdvertisedIPv4Port int
+	AdvertisedIPv6Port int
+	LatencyMillis      int64
+	ResponseBytes      int
+	ExtraFields        []string
+	RawAdvertisement   string
+}
+
+type JavaPlayer struct {
+	Name string `json:"name"`
+	ID   string `json:"id,omitempty"`
+}
+
+type JavaMod struct {
+	ID      string `json:"id"`
+	Version string `json:"version,omitempty"`
 }
 
 type JavaStatus struct {
-	VersionName     string
-	ProtocolVersion int
-	CurrentPlayers  int
-	MaxPlayers      int
-	MOTD            string
-	CleanMOTD       string
-	LatencyMillis   int64
-	IconPNG         []byte
-	IconType        string
+	VersionName         string
+	ProtocolVersion     int
+	CurrentPlayers      int
+	MaxPlayers          int
+	PlayerSample        []JavaPlayer
+	MOTD                string
+	CleanMOTD           string
+	LatencyMillis       int64
+	IconPNG             []byte
+	IconType            string
+	IconWidth           int
+	IconHeight          int
+	EnforcesSecureChat  *bool
+	PreviewsChat        *bool
+	PreventsChatReports *bool
+	ModLoader           string
+	Mods                []JavaMod
+	ModChannels         int
+	ModDataTruncated    bool
+	StatusJSONBytes     int
+	ExtraFields         []string
 }
 
 var mcFormatRE = regexp.MustCompile(`(?i)\x{00A7}[0-9A-FK-OR]`)
@@ -118,26 +152,37 @@ func minecraftANSISequence(code rune) string {
 
 func (p BedrockPong) String() string {
 	return fmt.Sprintf(
-		"Edition: Bedrock\nGameID: %s\nMOTD: %s\nCleanMOTD: %s\nProtocolVersion: %s\nGameVersion: %s\nPlayers: %s/%s",
+		"Edition: Bedrock\nGameID: %s\nMOTD: %s\nCleanMOTD: %s\nSubMOTD: %s\nProtocolVersion: %s\nGameVersion: %s\nPlayers: %s/%s\nGameMode: %s (%s)\nServerID: %s\nServerGUID: %d\nAdvertisedPorts: IPv4=%d IPv6=%d\nLatency(ms): %d",
 		p.GameID,
 		p.MOTD,
 		p.CleanMOTD,
+		p.SubMOTD,
 		p.ProtocolVersion,
 		p.GameVersion,
 		p.CurrentPlayers,
 		p.MaxPlayers,
+		p.GameMode,
+		p.GameModeNumeric,
+		p.ServerID,
+		p.ServerGUID,
+		p.AdvertisedIPv4Port,
+		p.AdvertisedIPv6Port,
+		p.LatencyMillis,
 	)
 }
 
 func (s JavaStatus) String() string {
 	return fmt.Sprintf(
-		"Edition: Java\nMOTD: %s\nCleanMOTD: %s\nVersion: %s\nProtocol: %d\nPlayers: %d/%d\nLatency(ms): %d",
+		"Edition: Java\nMOTD: %s\nCleanMOTD: %s\nVersion: %s\nProtocol: %d\nPlayers: %d/%d\nPlayerSample: %d\nLatency(ms): %d\nModLoader: %s\nMods: %d",
 		s.MOTD,
 		s.CleanMOTD,
 		s.VersionName,
 		s.ProtocolVersion,
 		s.CurrentPlayers,
 		s.MaxPlayers,
+		len(s.PlayerSample),
 		s.LatencyMillis,
+		s.ModLoader,
+		len(s.Mods),
 	)
 }

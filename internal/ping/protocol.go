@@ -6,6 +6,8 @@ import (
 	"io"
 )
 
+const maxPacketLength = 2 * 1024 * 1024
+
 func writePacket(w io.Writer, payload []byte) error {
 	header := &bytes.Buffer{}
 	writeVarInt(header, len(payload))
@@ -23,6 +25,9 @@ func readPacket(r io.Reader) ([]byte, error) {
 	}
 	if length < 0 {
 		return nil, fmt.Errorf("invalid packet length: %d", length)
+	}
+	if length > maxPacketLength {
+		return nil, fmt.Errorf("packet too large: %d bytes", length)
 	}
 	payload := make([]byte, length)
 	if _, err := io.ReadFull(r, payload); err != nil {

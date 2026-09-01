@@ -44,21 +44,46 @@ type StatusPlayers struct {
 	Max     int `json:"max"`
 }
 
+type StatusIcon struct {
+	Type   string `json:"type,omitempty"`
+	Width  int    `json:"width,omitempty"`
+	Height int    `json:"height,omitempty"`
+	Bytes  int    `json:"bytes"`
+}
+
 type StatusEntry struct {
-	Name            string         `json:"name,omitempty"`
-	Edition         ping.Edition   `json:"edition"`
-	Host            string         `json:"host"`
-	Port            int            `json:"port"`
-	Online          bool           `json:"online"`
-	Players         *StatusPlayers `json:"players,omitempty"`
-	MOTD            string         `json:"motd,omitempty"`
-	CleanMOTD       string         `json:"clean_motd,omitempty"`
-	Version         string         `json:"version,omitempty"`
-	ProtocolVersion string         `json:"protocol_version,omitempty"`
-	LatencyMillis   int64          `json:"latency_ms,omitempty"`
-	Error           string         `json:"error,omitempty"`
-	CheckedAt       time.Time      `json:"checked_at"`
-	DurationMillis  int64          `json:"duration_ms"`
+	Name                string            `json:"name,omitempty"`
+	Edition             ping.Edition      `json:"edition"`
+	Host                string            `json:"host"`
+	Port                int               `json:"port"`
+	Online              bool              `json:"online"`
+	Players             *StatusPlayers    `json:"players,omitempty"`
+	PlayerSample        []ping.JavaPlayer `json:"player_sample,omitempty"`
+	MOTD                string            `json:"motd,omitempty"`
+	CleanMOTD           string            `json:"clean_motd,omitempty"`
+	SubMOTD             string            `json:"sub_motd,omitempty"`
+	Version             string            `json:"version,omitempty"`
+	ProtocolVersion     string            `json:"protocol_version,omitempty"`
+	LatencyMillis       int64             `json:"latency_ms,omitempty"`
+	ServerID            string            `json:"server_id,omitempty"`
+	ServerGUID          uint64            `json:"server_guid,omitempty"`
+	GameMode            string            `json:"game_mode,omitempty"`
+	GameModeNumeric     string            `json:"game_mode_numeric,omitempty"`
+	AdvertisedIPv4Port  int               `json:"advertised_ipv4_port,omitempty"`
+	AdvertisedIPv6Port  int               `json:"advertised_ipv6_port,omitempty"`
+	EnforcesSecureChat  *bool             `json:"enforces_secure_chat,omitempty"`
+	PreviewsChat        *bool             `json:"previews_chat,omitempty"`
+	PreventsChatReports *bool             `json:"prevents_chat_reports,omitempty"`
+	ModLoader           string            `json:"mod_loader,omitempty"`
+	Mods                []ping.JavaMod    `json:"mods,omitempty"`
+	ModChannels         int               `json:"mod_channels,omitempty"`
+	ModDataTruncated    bool              `json:"mod_data_truncated,omitempty"`
+	Icon                *StatusIcon       `json:"icon,omitempty"`
+	ResponseBytes       int               `json:"response_bytes,omitempty"`
+	ExtraFields         []string          `json:"extra_fields,omitempty"`
+	Error               string            `json:"error,omitempty"`
+	CheckedAt           time.Time         `json:"checked_at"`
+	DurationMillis      int64             `json:"duration_ms"`
 }
 
 type StatusResponse struct {
@@ -282,6 +307,16 @@ func (s *StatusAPIServer) queryOne(ctx context.Context, target StatusServerTarge
 		entry.CleanMOTD = value.CleanMOTD
 		entry.Version = value.GameVersion
 		entry.ProtocolVersion = value.ProtocolVersion
+		entry.SubMOTD = value.SubMOTD
+		entry.LatencyMillis = value.LatencyMillis
+		entry.ServerID = value.ServerID
+		entry.ServerGUID = value.ServerGUID
+		entry.GameMode = value.GameMode
+		entry.GameModeNumeric = value.GameModeNumeric
+		entry.AdvertisedIPv4Port = value.AdvertisedIPv4Port
+		entry.AdvertisedIPv6Port = value.AdvertisedIPv6Port
+		entry.ResponseBytes = value.ResponseBytes
+		entry.ExtraFields = append([]string(nil), value.ExtraFields...)
 		entry.Players = parseStatusPlayers(value.CurrentPlayers, value.MaxPlayers)
 	case ping.JavaStatus:
 		entry.MOTD = value.MOTD
@@ -290,6 +325,19 @@ func (s *StatusAPIServer) queryOne(ctx context.Context, target StatusServerTarge
 		entry.ProtocolVersion = strconv.Itoa(value.ProtocolVersion)
 		entry.LatencyMillis = value.LatencyMillis
 		entry.Players = &StatusPlayers{Current: value.CurrentPlayers, Max: value.MaxPlayers}
+		entry.PlayerSample = append([]ping.JavaPlayer(nil), value.PlayerSample...)
+		entry.EnforcesSecureChat = value.EnforcesSecureChat
+		entry.PreviewsChat = value.PreviewsChat
+		entry.PreventsChatReports = value.PreventsChatReports
+		entry.ModLoader = value.ModLoader
+		entry.Mods = append([]ping.JavaMod(nil), value.Mods...)
+		entry.ModChannels = value.ModChannels
+		entry.ModDataTruncated = value.ModDataTruncated
+		entry.ResponseBytes = value.StatusJSONBytes
+		entry.ExtraFields = append([]string(nil), value.ExtraFields...)
+		if len(value.IconPNG) > 0 {
+			entry.Icon = &StatusIcon{Type: value.IconType, Width: value.IconWidth, Height: value.IconHeight, Bytes: len(value.IconPNG)}
+		}
 	}
 	return entry
 }
