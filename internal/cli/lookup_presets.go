@@ -118,8 +118,7 @@ func (a *App) manageLookupPresets() error {
 
 func removePresetEntry(title string, values []string) ([]string, error) {
 	if len(values) == 0 {
-		renderTextPage(title, "No saved entries.")
-		_ = waitForEnter()
+		_ = renderTextPageAndWait(title, "No saved entries.")
 		return values, nil
 	}
 	options := append([]string(nil), values...)

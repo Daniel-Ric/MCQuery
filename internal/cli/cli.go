@@ -35,6 +35,8 @@ func NewApp() *App {
 }
 
 func (a *App) Run() (err error) {
+	endSession := beginConsoleSession()
+	defer endSession()
 	defer a.recoverPanic(&err)
 
 	if !a.showStartupWarnings() {
@@ -208,14 +210,14 @@ func (a *App) collectLookupConfig() (LookupConfig, error) {
 }
 
 func (a *App) askMode() (Mode, error) {
-	index, err := selectOption("MCQuery", []string{
-		"Direct query: Check one server",
-		"Favorites: Saved server profiles",
-		"Batch check: Run a target file",
-		"Port scan: Probe common ports",
-		"IP/domain lookup: Sweep domains and subdomains",
-		"Settings: Network, output and presets",
-		"Update check: Compare with GitHub",
+	index, err := selectOption("Operations console", []string{
+		"Direct query: Ping one Bedrock or Java server",
+		"Favorites: Open saved server profiles",
+		"Batch check: Query a complete target file",
+		"Port scan: Discover services on common ports",
+		"IP/domain lookup: Sweep domains, subdomains and ports",
+		"Settings: Tune network, output and lookup behavior",
+		"Update check: Compare this build with GitHub",
 		"Exit",
 	})
 	if err != nil {
@@ -774,7 +776,10 @@ func (a *App) executeLookup(config LookupConfig) error {
 }
 
 func (a *App) askAgain() (bool, error) {
-	index, err := selectOption("Next step", []string{"Main menu", "Exit"})
+	index, err := selectOption("Session complete", []string{
+		"Back to dashboard: Start another MCQuery operation",
+		"Exit: Close the operations console",
+	})
 	if err != nil {
 		return false, err
 	}
@@ -866,10 +871,8 @@ func formatLookupResult(result ping.LookupResult, links []web.LookupLinkURLs, me
 
 	builder.WriteString("Matches\n")
 	for i, match := range result.Matches {
-		if i > 0 {
-			builder.WriteString("\n")
-		}
-		builder.WriteString(fmt.Sprintf("Match %d\n", i+1))
+		writeResultEntryDivider(&builder, i)
+		builder.WriteString(fmt.Sprintf("Match %d of %d\n", i+1, len(result.Matches)))
 		builder.WriteString(fmt.Sprintf("Host: %s\n", match.Host))
 		builder.WriteString(fmt.Sprintf("Port: %d\n", match.Port))
 		if i < len(links) {

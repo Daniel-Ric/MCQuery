@@ -73,8 +73,7 @@ func (a *App) manageFavorites() error {
 		switch index {
 		case 0:
 			if len(favorites) == 0 {
-				renderTextPage("Favorites", "No favorites saved yet.")
-				_ = waitForEnter()
+				_ = renderTextPageAndWait("Favorites", "No favorites saved yet.")
 				continue
 			}
 			favIndex, err := selectFavorite(favorites, "Run favorite")
@@ -105,8 +104,7 @@ func (a *App) manageFavorites() error {
 			}
 		case 2:
 			if len(favorites) == 0 {
-				renderTextPage("Favorites", "No favorites saved yet.")
-				_ = waitForEnter()
+				_ = renderTextPageAndWait("Favorites", "No favorites saved yet.")
 				continue
 			}
 			favIndex, err := selectFavorite(favorites, "Delete favorite")

@@ -27,6 +27,7 @@
 - [Directory Layout](#directory-layout)
 - [Troubleshooting](#troubleshooting)
 - [Contributing](#contributing)
+- [Release Automation](#release-automation)
 - [License](#license)
 
 ---
@@ -35,7 +36,7 @@
 
 **MCQuery** is a focused CLI tool for checking Minecraft server status. It supports both **Bedrock** (UDP ping with RakNet unconnected ping) and **Java** (status + latency handshake) editions, and ships with an interactive lookup mode that tries combinations of subdomains and domain endings to find reachable servers.
 
-The UI is terminal-native: selection menus use raw input, progress is shown with a spinner, and results are formatted for quick copy/paste.
+The UI is terminal-native: MCQuery runs in a dedicated full-screen operations console with responsive action/detail panels, live progress telemetry, and scrollable result pages.
 
 ---
 
@@ -45,18 +46,30 @@ The UI is terminal-native: selection menus use raw input, progress is shown with
 - 🔎 **Lookup mode** to probe subdomain + domain ending combinations.
 - ⚡ **Concurrent lookup** with automatic concurrency sizing.
 - 🧭 **Interactive terminal UI** with keyboard navigation and live progress.
+- 🖥️ **Responsive operations console** with contextual action details and a clean alternate-screen session.
+- 📜 **Scrollable result viewer** for large lookups, batches, scans, and verbose output.
 - 🧼 **Clean MOTD rendering** (strips Minecraft color codes).
 
 ---
 
 ## Quickstart
 
-```bash
-# Build
-go build -o uwp-tcp-con ./cmd/uwp-tcp-con
+Download `MCQuery.exe` from the latest GitHub release and open it to start the interactive console. The same executable also accepts command-line flags, so no separate CLI binary is required.
 
-# Run
-./uwp-tcp-con
+Build the Windows executable locally:
+
+```powershell
+go build -o MCQuery.exe ./cmd/uwp-tcp-con
+.\MCQuery.exe
+.\MCQuery.exe --version
+```
+
+Build on Linux or macOS:
+
+```bash
+go build -o mcquery ./cmd/uwp-tcp-con
+
+./mcquery
 ```
 
 Or run directly:
@@ -85,7 +98,16 @@ scripts\start-api.cmd
 
 ## Usage
 
-On launch you’ll choose a mode and edition using the arrow keys (or W/S) and Enter.
+On launch you’ll enter the operations console and choose a mode with the arrow keys (or W/S) and Enter. Wide terminals show contextual details beside the selected action; narrow terminals automatically use a stacked layout.
+
+Common controls:
+
+- `Up` / `Down`, `W` / `S`, or `J` / `K`: move or scroll.
+- `1`-`9`: open a visible menu action directly.
+- `Enter`: open or confirm; `Q`: go back.
+- `?` or `F1`: show keyboard help.
+- `Page Up` / `Page Down`, `Home` / `End`: navigate long result pages.
+- `P` or `Space`: pause/resume supported long-running scans; `Q` cancels them.
 
 ### Direct Query (UWP/TCP)
 
@@ -119,13 +141,13 @@ The API keeps the normal CLI untouched and adds fast JSON/SSE endpoints for dash
 Start it with:
 
 ```bash
-./uwp-tcp-con --api --api-addr 127.0.0.1:8080
+./mcquery --api --api-addr 127.0.0.1:8080
 ```
 
 Or from a config file:
 
 ```bash
-./uwp-tcp-con --api-config config/api.example.json
+./mcquery --api-config config/api.example.json
 ```
 
 For local changes, copy `config/api.example.json` to `config/api.local.json`. The quickstart scripts will use `api.local.json` automatically when it exists.
@@ -175,11 +197,15 @@ The stream uses Server-Sent Events and sends a fresh grouped status payload ever
 ## Output Details
 
 - **Bedrock**
-  - Game ID, MOTD, protocol/game versions, and player counts.
+  - Edition code, both MOTD lines/world name, protocol/game versions, and player counts.
+  - Game mode, server ID, RakNet GUID, advertised IPv4/IPv6 ports, response size, extension fields, and UDP round-trip latency.
 - **Java**
-  - Version name, protocol version, player counts, and **latency (ms)**.
+  - Version name, protocol version, player counts, advertised player sample, and **latency (ms)**.
+  - Server-icon type/dimensions, secure-chat flags, custom status fields, and Forge/FML loader, mod, channel, and truncation metadata when advertised.
 
 Both editions include a **clean MOTD** with Minecraft formatting stripped.
+
+These values come from the public server-list ping. They do not prove that login/authentication succeeds and cannot provide TPS, complete player lists, or world health without a separate authenticated/query-capable server integration.
 
 ---
 
@@ -201,6 +227,7 @@ scripts/             # quickstart launch scripts
 - **Timeouts**: ensure the server is reachable and the port is open.
 - **No IPv4 address**: Bedrock pings require an IPv4 resolution for the host.
 - **Terminal input issues**: try running in a real TTY (not a basic shell emulator).
+- **Visible sequences such as `←[2m` on Windows**: replace older builds with the latest `MCQuery.exe`; current builds enable Windows virtual-terminal output automatically.
 
 ---
 
@@ -209,6 +236,14 @@ scripts/             # quickstart launch scripts
 1. Fork the repo and create a feature branch.
 2. Keep changes minimal and consistent with existing style.
 3. Update README if user-facing behavior changes.
+
+---
+
+## Release Automation
+
+CI runs vet, tests, and builds on Linux and Windows. Pushes to `master` also run the release checks. When `appVersion` in `internal/cli/update_check.go` contains a version that has not been published yet, GitHub Actions creates the matching `vX.Y.Z` tag and a GitHub release with generated notes. It then builds `MCQuery.exe` for Windows x64 and `MCQuery-arm64.exe` for Windows ARM64, creates SHA-256 checksums, and attaches all files to the release.
+
+Existing versions are skipped safely, and a configured version older than the latest tag fails instead of publishing a version regression. Add `[skip release]` to a commit message when a push should run without release automation.
 
 ---
 

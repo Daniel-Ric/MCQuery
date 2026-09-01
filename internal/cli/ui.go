@@ -14,14 +14,15 @@ import (
 )
 
 const (
-	colorReset  = "\033[0m"
-	colorDim    = "\033[2m"
-	colorAccent = "\033[36m"
-	colorBlue   = "\033[34m"
-	colorGreen  = "\033[32m"
-	colorRed    = "\033[31m"
-	colorWarn   = "\033[33m"
-	colorBold   = "\033[1m"
+	colorReset    = "\033[0m"
+	colorDim      = "\033[2m"
+	colorAccent   = "\033[36m"
+	colorBlue     = "\033[34m"
+	colorGreen    = "\033[32m"
+	colorRed      = "\033[31m"
+	colorWarn     = "\033[33m"
+	colorBold     = "\033[1m"
+	colorSelected = "\033[97;44m"
 )
 
 var errAborted = errors.New("aborted")
@@ -29,7 +30,53 @@ var errAborted = errors.New("aborted")
 var (
 	activeFrameLines int
 	frameReady       bool
+	immersiveUI      bool
 )
+
+func beginConsoleSession() func() {
+	restoreOutputMode := enableVirtualTerminalOutput()
+	noAlternateScreen := strings.TrimSpace(os.Getenv("MCQUERY_NO_ALT_SCREEN"))
+	if noAlternateScreen == "1" || strings.EqualFold(noAlternateScreen, "true") || strings.EqualFold(strings.TrimSpace(os.Getenv("TERM")), "dumb") {
+		return restoreOutputMode
+	}
+
+	immersiveUI = true
+	activeFrameLines = 0
+	frameReady = false
+	fmt.Print("\033[?1049h\033[?25l\033[2J\033[H")
+
+	return func() {
+		if !immersiveUI {
+			return
+		}
+		fmt.Print("\033[?25h\033[0m\033[2J\033[H\033[?1049l")
+		immersiveUI = false
+		activeFrameLines = 0
+		frameReady = false
+		restoreOutputMode()
+	}
+}
+
+func setCursorVisible(visible bool) {
+	if !immersiveUI {
+		return
+	}
+	if visible {
+		fmt.Print("\033[?25h")
+		return
+	}
+	fmt.Print("\033[?25l")
+}
+
+func moveCursorTo(row, column int) {
+	if row < 1 {
+		row = 1
+	}
+	if column < 1 {
+		column = 1
+	}
+	fmt.Printf("\033[%d;%dH", row, column)
+}
 
 func supportsColor() bool {
 	if os.Getenv("NO_COLOR") != "" {
@@ -45,7 +92,11 @@ func supportsColor() bool {
 	if os.Getenv("TERMINAL_EMULATOR") == "JetBrains-JediTerm" || os.Getenv("IDEA_INITIAL_DIRECTORY") != "" {
 		return true
 	}
-	return os.Getenv("WT_SESSION") != "" || os.Getenv("ConEmuANSI") == "ON" || os.Getenv("ANSICON") != ""
+	if os.Getenv("WT_SESSION") != "" || os.Getenv("ConEmuANSI") == "ON" || os.Getenv("ANSICON") != "" {
+		return true
+	}
+	_, _, interactive := readTerminalSize()
+	return interactive
 }
 
 func style(text, color string) string {
@@ -68,14 +119,22 @@ func promptInput(label, hint, errMsg string) (string, error) {
 		body = append(body, formatKeyValue("Hint", hint))
 	}
 	body = append(body, "")
-	body = append(body, colorize("mcquery", colorAccent, colorBold)+style(" > ", colorDim))
-	renderFrame(label, body)
+	prompt := colorize("mcquery", colorAccent, colorBold) + style(" › ", colorDim)
+	body = append(body, prompt)
+	lines := renderFrame(label, body)
+	if immersiveUI {
+		moveCursorTo(lines-1, 3+printableWidth(prompt))
+	} else {
+		moveCursorUp(1)
+		moveCursorColumn(3 + printableWidth(prompt))
+	}
+	setCursorVisible(true)
+	defer setCursorVisible(false)
 	reader := bufio.NewReader(os.Stdin)
 	value, err := reader.ReadString('\n')
 	if err != nil {
 		return "", err
 	}
-	activeFrameLines++
 	return strings.TrimSpace(value), nil
 }
 
@@ -117,6 +176,15 @@ func selectOptionWithInitial(title string, options []string, initial int) (int, 
 		switch b {
 		case 3, 'q', 'Q':
 			return 0, errAborted
+		case '?':
+			renderKeyboardHelp()
+			if _, err := reader.ReadByte(); err != nil {
+				return 0, err
+			}
+			lines = updateMenu(title, options, selected, "", lines)
+		case 9:
+			selected = (selected + 1) % len(options)
+			lines = updateMenu(title, options, selected, "", lines)
 		case 'w', 'W', 'k', 'K':
 			if selected > 0 {
 				selected--
@@ -134,7 +202,13 @@ func selectOptionWithInitial(title string, options []string, initial int) (int, 
 			if err != nil {
 				return 0, err
 			}
-			if seq == "[A" || seq == "OA" {
+			if seq == "OP" {
+				renderKeyboardHelp()
+				if _, err := reader.ReadByte(); err != nil {
+					return 0, err
+				}
+			}
+			if seq == "[A" || seq == "OA" || seq == "[Z" {
 				if selected > 0 {
 					selected--
 				}
@@ -143,6 +217,18 @@ func selectOptionWithInitial(title string, options []string, initial int) (int, 
 				if selected < len(options)-1 {
 					selected++
 				}
+			}
+			if seq == "[H" || seq == "OH" {
+				selected = 0
+			}
+			if seq == "[F" || seq == "OF" {
+				selected = len(options) - 1
+			}
+			if seq == "[5~" {
+				selected = maxInt(0, selected-maxInt(1, terminalHeight()/2))
+			}
+			if seq == "[6~" {
+				selected = minInt(len(options)-1, selected+maxInt(1, terminalHeight()/2))
 			}
 			lines = updateMenu(title, options, selected, "", lines)
 		case 0, 224:
@@ -182,24 +268,46 @@ func readEscapeSequence(reader *bufio.Reader) (string, error) {
 
 func renderMenuBlock(title string, options []string, selected int, hint string, clear bool) int {
 	_ = clear
-	body := make([]string, 0, len(options)+6)
-	body = append(body, formatKeyValue("Selection", fmt.Sprintf("%d/%d", selected+1, len(options))))
-	body = append(body, "")
 	start, end := visibleMenuRange(len(options), selected)
 	labelWidth := menuLabelWidth(options[start:end])
-	if start > 0 {
-		body = append(body, style(fmt.Sprintf("  %d more above", start), colorDim))
-	}
-	for i := start; i < end; i++ {
-		option := options[i]
-		body = append(body, formatMenuOption(i, option, i == selected, labelWidth))
-	}
-	if end < len(options) {
-		body = append(body, style(fmt.Sprintf("  %d more below", len(options)-end), colorDim))
+	body := make([]string, 0, len(options)+8)
+
+	if contentWidth() >= 72 {
+		leftWidth := clampInt(contentWidth()*56/100, 34, 60)
+		rightWidth := maxInt(18, contentWidth()-leftWidth-3)
+		left := []string{
+			colorize("ACTIONS", colorAccent, colorBold),
+			formatKeyValue("Selection", fmt.Sprintf("%d/%d", selected+1, len(options))),
+			"",
+		}
+		if start > 0 {
+			left = append(left, style(fmt.Sprintf("  ↑ %d more", start), colorDim))
+		}
+		for i := start; i < end; i++ {
+			left = append(left, formatMenuOptionWidth(i, options[i], i == selected, labelWidth, leftWidth))
+		}
+		if end < len(options) {
+			left = append(left, style(fmt.Sprintf("  ↓ %d more", len(options)-end), colorDim))
+		}
+
+		right := menuContextLines(title, options[selected], selected, len(options), rightWidth)
+		body = append(body, joinMenuColumns(left, right, leftWidth, rightWidth)...)
+	} else {
+		body = append(body, formatKeyValue("Selection", fmt.Sprintf("%d/%d", selected+1, len(options))))
+		body = append(body, "")
+		if start > 0 {
+			body = append(body, style(fmt.Sprintf("  ↑ %d more", start), colorDim))
+		}
+		for i := start; i < end; i++ {
+			body = append(body, formatMenuOptionWidth(i, options[i], i == selected, labelWidth, contentWidth()))
+		}
+		if end < len(options) {
+			body = append(body, style(fmt.Sprintf("  ↓ %d more", len(options)-end), colorDim))
+		}
 	}
 	body = append(body, "")
 	if hint == "" {
-		hint = "Arrows/W-S move | 1-9 jump | Enter select | Q back"
+		hint = "↑↓/W-S move   1-9 jump   Enter open   ? help   Q back"
 	}
 	body = append(body, formatHint(hint))
 	return renderFrame(title, body)
@@ -234,16 +342,28 @@ func clearScreen() {
 }
 
 func renderTextPage(title, content string) {
-	lines := strings.Split(content, "\n")
-	renderPage(title, lines)
+	body := formatPageBody(strings.Split(content, "\n"))
+	capacity := pageContentCapacity()
+	if len(body) > capacity {
+		body = append(append([]string(nil), body[:capacity]...), "", formatHint("More content available • press Enter to open the pager"))
+	}
+	renderFrame(title, body)
 }
 
 func renderTextPageAndWait(title, content string) error {
-	renderTextPage(title, content)
-	return waitForEnter()
+	body := formatPageBody(strings.Split(content, "\n"))
+	if !immersiveUI {
+		renderFrame(title, body)
+		return waitForEnter()
+	}
+	return browseTextPage(title, body)
 }
 
 func renderPage(title string, lines []string) {
+	renderFrame(title, formatPageBody(lines))
+}
+
+func formatPageBody(lines []string) []string {
 	body := make([]string, 0, len(lines))
 	for _, line := range lines {
 		if strings.TrimSpace(line) == "" {
@@ -254,7 +374,116 @@ func renderPage(title string, lines []string) {
 			body = append(body, formatPageLine(wrapped))
 		}
 	}
-	renderFrame(title, body)
+	return body
+}
+
+func pageContentCapacity() int {
+	return maxInt(3, terminalHeight()-8)
+}
+
+func browseTextPage(title string, body []string) error {
+	fd := int(os.Stdin.Fd())
+	state, err := makeRaw(fd)
+	if err != nil {
+		renderFrame(title, body)
+		return waitForEnter()
+	}
+	defer restore(fd, state)
+	setCursorVisible(false)
+
+	reader := bufio.NewReader(os.Stdin)
+	offset := 0
+	for {
+		capacity := pageContentCapacity()
+		maxOffset := maxInt(0, len(body)-capacity)
+		offset = clampInt(offset, 0, maxOffset)
+		end := minInt(len(body), offset+capacity)
+		visible := append([]string(nil), body[offset:end]...)
+		visible = append(visible, "")
+		if len(body) > capacity {
+			page := offset/capacity + 1
+			pages := (len(body) + capacity - 1) / capacity
+			visible = append(visible, formatKeyValue("View", fmt.Sprintf("page %d/%d • lines %d-%d of %d", page, pages, offset+1, end, len(body))))
+			visible = append(visible, formatHint("↑↓/J-K scroll   PgUp/PgDn page   Home/End jump   Enter/Q close"))
+		} else {
+			visible = append(visible, formatHint("Enter/Q close   ? shortcuts"))
+		}
+		renderFrame(title, visible)
+
+		key, err := reader.ReadByte()
+		if err != nil {
+			return err
+		}
+		switch key {
+		case 3:
+			return errAborted
+		case 10, 13, 'q', 'Q':
+			return nil
+		case 'j', 'J', 's', 'S':
+			offset = minInt(maxOffset, offset+1)
+		case 'k', 'K', 'w', 'W':
+			offset = maxInt(0, offset-1)
+		case ' ', 'f', 'F':
+			offset = minInt(maxOffset, offset+capacity)
+		case 'b', 'B':
+			offset = maxInt(0, offset-capacity)
+		case 'g':
+			offset = 0
+		case 'G':
+			offset = maxOffset
+		case '?':
+			renderKeyboardHelp()
+			if _, err := reader.ReadByte(); err != nil {
+				return err
+			}
+		case 27:
+			sequence, err := readEscapeSequence(reader)
+			if err != nil {
+				return err
+			}
+			switch sequence {
+			case "[A", "OA":
+				offset = maxInt(0, offset-1)
+			case "[B", "OB":
+				offset = minInt(maxOffset, offset+1)
+			case "[5~":
+				offset = maxInt(0, offset-capacity)
+			case "[6~":
+				offset = minInt(maxOffset, offset+capacity)
+			case "[H", "OH":
+				offset = 0
+			case "[F", "OF":
+				offset = maxOffset
+			case "OP":
+				renderKeyboardHelp()
+				if _, err := reader.ReadByte(); err != nil {
+					return err
+				}
+			}
+		}
+	}
+}
+
+func renderKeyboardHelp() {
+	body := []string{
+		colorize("NAVIGATION", colorAccent, colorBold),
+		formatKeyValue("↑ / ↓", "move through choices or scroll results"),
+		formatKeyValue("W-S / J-K", "keyboard alternatives for navigation"),
+		formatKeyValue("1-9", "open a visible menu action directly"),
+		formatKeyValue("Home / End", "jump to the first or last entry"),
+		formatKeyValue("PgUp / PgDn", "move by a complete result page"),
+		"",
+		colorize("ACTIONS", colorAccent, colorBold),
+		formatKeyValue("Enter", "open, confirm or close a result"),
+		formatKeyValue("Tab", "advance to the next menu action"),
+		formatKeyValue("Q / Ctrl+C", "go back or close the console"),
+		formatKeyValue("? / F1", "show this shortcut reference"),
+		"",
+		formatStatus("Tip", "P or Space pauses long scans; Q cancels them", "success"),
+		"",
+		formatHint("Press any key to return"),
+	}
+	renderFrame("Keyboard shortcuts", body)
 }
 
 func renderSpinnerPage(title, message, frame string) {
@@ -270,10 +499,12 @@ func renderHeaderLines(title string) int {
 }
 
 func renderFrame(title string, body []string) int {
-	lines := make([]string, 0, len(body)+4)
+	lines := make([]string, 0, len(body)+5)
 	lines = append(lines, buildHeaderLines(title)...)
-	lines = append(lines, "")
-	lines = append(lines, body...)
+	for _, line := range body {
+		lines = append(lines, frameContentLine(line))
+	}
+	lines = append(lines, style("╰"+strings.Repeat("─", frameWidth()-2)+"╯", colorDim))
 	return drawFrame(lines)
 }
 
@@ -282,7 +513,10 @@ func drawFrame(lines []string) int {
 		lines = []string{""}
 	}
 	lines = fitFrameToViewport(lines)
-	if frameReady {
+	if immersiveUI {
+		fmt.Print("\033[H")
+		frameReady = true
+	} else if frameReady {
 		moveCursorUp(activeFrameLines - 1)
 	} else {
 		frameReady = true
@@ -303,7 +537,9 @@ func drawFrame(lines []string) int {
 	}
 
 	targetLine := maxInt(len(lines), 1)
-	if renderLines > targetLine {
+	if immersiveUI {
+		moveCursorTo(targetLine, 1)
+	} else if renderLines > targetLine {
 		moveCursorUp(renderLines - targetLine)
 	}
 	col := 1
@@ -317,6 +553,12 @@ func drawFrame(lines []string) int {
 
 func clearCurrentFrame() {
 	if !frameReady || activeFrameLines <= 0 {
+		return
+	}
+	if immersiveUI {
+		fmt.Print("\033[2J\033[H")
+		activeFrameLines = 0
+		frameReady = false
 		return
 	}
 	moveCursorUp(activeFrameLines - 1)
@@ -341,9 +583,13 @@ func fitFrameToViewport(lines []string) []string {
 	if height <= 1 || len(lines) <= height {
 		return lines
 	}
-	hidden := len(lines) - height + 1
-	clipped := append([]string(nil), lines[:height]...)
-	clipped[height-1] = style(fmt.Sprintf("... %d more lines below", hidden), colorDim)
+	if height < 4 {
+		return append([]string(nil), lines[:height]...)
+	}
+	hidden := len(lines) - height + 2
+	clipped := append([]string(nil), lines[:height-2]...)
+	clipped = append(clipped, frameContentLine(style(fmt.Sprintf("… %d more lines below", hidden), colorDim)))
+	clipped = append(clipped, lines[len(lines)-1])
 	return clipped
 }
 
@@ -375,22 +621,45 @@ func printableWidth(value string) int {
 }
 
 func buildHeaderLines(title string) []string {
-	width := contentWidth()
-	brand := colorize("MCQuery", colorAccent, colorBold)
-	version := style("v"+appVersion, colorDim)
-	plainTitle := strings.TrimSpace(title)
-	if strings.TrimSpace(title) != "" && title != "MCQuery" {
-		plainTitle = truncateText(plainTitle, maxInt(12, width-18))
-		brand = fmt.Sprintf("%s %s  %s", brand, version, colorize(plainTitle, colorBold))
-	} else {
-		brand = fmt.Sprintf("%s %s", brand, version)
-	}
-	subtitle := truncateText("Minecraft server query for Bedrock and Java", width)
+	width := frameWidth()
+	inner := contentWidth()
+	brand := colorize("MCQUERY", colorAccent, colorBold) + " " + style("v"+appVersion, colorDim)
+	badge := colorize("BEDROCK + JAVA", colorGreen, colorBold)
+	subtitle := style("Check Minecraft servers.", colorDim)
 	return []string{
-		brand,
-		style(subtitle, colorDim),
-		style(strings.Repeat("-", width), colorDim),
+		style("╭"+strings.Repeat("─", width-2)+"╮", colorDim),
+		frameContentLine(alignFrameSides(brand, badge, inner)),
+		frameContentLine(subtitle),
+		frameTitleDivider(title),
 	}
+}
+
+func frameWidth() int {
+	return clampInt(terminalWidth()-2, 36, 120)
+}
+
+func frameContentLine(value string) string {
+	inner := contentWidth()
+	return style("│", colorDim) + " " + padDisplay(value, inner) + " " + style("│", colorDim)
+}
+
+func frameTitleDivider(title string) string {
+	width := frameWidth()
+	title = strings.ToUpper(strings.TrimSpace(title))
+	if title == "" {
+		return style("├"+strings.Repeat("─", width-2)+"┤", colorDim)
+	}
+	title = truncateText(title, maxInt(1, width-8))
+	dashes := maxInt(0, width-len([]rune(title))-5)
+	return style("├─ ", colorDim) + colorize(title, colorAccent, colorBold) + style(" "+strings.Repeat("─", dashes)+"┤", colorDim)
+}
+
+func alignFrameSides(left, right string, width int) string {
+	gap := width - printableWidth(left) - printableWidth(right)
+	if gap < 2 {
+		return truncateDisplayText(left, width)
+	}
+	return left + strings.Repeat(" ", gap) + right
 }
 
 func terminalSize() (int, int) {
@@ -413,7 +682,7 @@ func terminalHeight() int {
 }
 
 func contentWidth() int {
-	return clampInt(terminalWidth()-2, 34, 112)
+	return maxInt(32, frameWidth()-4)
 }
 
 func envInt(name string, fallback int) int {
@@ -432,7 +701,9 @@ func visibleMenuRange(total, selected int) (int, int) {
 	if total <= 0 {
 		return 0, 0
 	}
-	headerAndFooter := 8
+	// Reserve space for the branded frame, selection metadata, scroll markers,
+	// and the persistent shortcut footer.
+	headerAndFooter := 12
 	available := terminalHeight() - headerAndFooter
 	if available < 4 {
 		available = 4
@@ -454,13 +725,107 @@ func visibleMenuRange(total, selected int) (int, int) {
 }
 
 func formatMenuOption(index int, option string, selected bool, labelWidth int) string {
+	return formatMenuOptionWidth(index, option, selected, labelWidth, maxInt(12, contentWidth()-2))
+}
+
+func formatMenuOptionWidth(index int, option string, selected bool, labelWidth int, width int) string {
+	width = maxInt(12, width)
+	if selected && supportsColor() {
+		plain := fmt.Sprintf(" › %d  %s", index+1, strings.TrimSpace(option))
+		plain = padRight(truncateText(plain, width), width)
+		return style(plain, colorSelected)
+	}
 	prefix := " "
 	if selected {
-		prefix = colorize(">", colorAccent, colorBold)
+		prefix = "›"
 	}
 	key := style(fmt.Sprintf("%2d", index+1), colorDim)
-	text := formatOptionText(option, selected, labelWidth, maxInt(12, contentWidth()-8))
+	text := formatOptionText(option, selected, labelWidth, maxInt(8, width-7))
 	return fmt.Sprintf("%s %s  %s", prefix, key, text)
+}
+
+func joinMenuColumns(left, right []string, leftWidth, rightWidth int) []string {
+	rows := maxInt(len(left), len(right))
+	result := make([]string, 0, rows)
+	divider := style(" │ ", colorDim)
+	for row := 0; row < rows; row++ {
+		leftLine := ""
+		if row < len(left) {
+			leftLine = left[row]
+		}
+		rightLine := ""
+		if row < len(right) {
+			rightLine = right[row]
+		}
+		result = append(result, padDisplay(leftLine, leftWidth)+divider+truncateDisplayText(rightLine, rightWidth))
+	}
+	return result
+}
+
+func menuContextLines(title, option string, selected, total, width int) []string {
+	label, detail, hasDetail := splitOptionLabel(option)
+	if !hasDetail {
+		detail = menuFallbackDetail(label)
+	}
+	lines := []string{
+		colorize("OVERVIEW", colorAccent, colorBold),
+		style(fmt.Sprintf("%s  •  %d of %d", title, selected+1, total), colorDim),
+		"",
+		colorize(label, colorBold),
+	}
+	for _, line := range wrapDisplayLine(detail, width) {
+		lines = append(lines, line)
+	}
+	lines = append(lines, "")
+	for _, line := range menuCapabilityLines(label) {
+		for index, wrapped := range wrapDisplayLine("• "+line, width) {
+			if index == 0 {
+				lines = append(lines, style("• ", colorAccent)+strings.TrimPrefix(wrapped, "• "))
+			} else {
+				lines = append(lines, "  "+wrapped)
+			}
+		}
+	}
+	lines = append(lines, "", formatStatus("Ready", "Enter to open", "success"))
+	return lines
+}
+
+func menuFallbackDetail(label string) string {
+	lower := strings.ToLower(strings.TrimSpace(label))
+	switch {
+	case lower == "back":
+		return "Return to the previous workspace without changing anything."
+	case lower == "exit":
+		return "Close MCQuery and restore the terminal exactly as it was."
+	case strings.Contains(lower, "enabled"):
+		return "Use the enabled setting for future operations."
+	case strings.Contains(lower, "disabled"):
+		return "Keep this feature disabled for future operations."
+	default:
+		return "Open this option and continue with the guided workflow."
+	}
+}
+
+func menuCapabilityLines(label string) []string {
+	lower := strings.ToLower(label)
+	switch {
+	case strings.Contains(lower, "direct query"):
+		return []string{"Bedrock UDP and Java TCP", "SRV discovery, latency, players and MOTD", "Optional exports and Bedrock join links"}
+	case strings.Contains(lower, "favorites"):
+		return []string{"Reusable server profiles", "Fast repeat checks", "Local configuration storage"}
+	case strings.Contains(lower, "batch"):
+		return []string{"Mixed-edition target lists", "Pause and cancel controls", "Consolidated result export"}
+	case strings.Contains(lower, "port scan"):
+		return []string{"Edition-aware common ports", "Custom ranges", "Concurrent probing"}
+	case strings.Contains(lower, "domain lookup"):
+		return []string{"Subdomain and TLD combinations", "Live rate and ETA telemetry", "Sorting and result filters"}
+	case strings.Contains(lower, "settings"):
+		return []string{"Timeouts, retries and IP mode", "Concurrency and rate limits", "Output paths and presets"}
+	case strings.Contains(lower, "update"):
+		return []string{"Release and tag comparison", "Five-second network timeout", "No automatic installation"}
+	default:
+		return []string{"Keyboard-first navigation", "Changes remain local until confirmed"}
+	}
 }
 
 func formatOptionText(option string, selected bool, labelWidth int, width int) string {
@@ -528,6 +893,56 @@ func padRight(value string, width int) string {
 	return value + strings.Repeat(" ", padding)
 }
 
+func padDisplay(value string, width int) string {
+	value = truncateDisplayText(value, width)
+	padding := width - printableWidth(value)
+	if padding <= 0 {
+		return value
+	}
+	return value + strings.Repeat(" ", padding)
+}
+
+func truncateDisplayText(value string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if printableWidth(value) <= width {
+		return value
+	}
+	target := maxInt(1, width-1)
+	var builder strings.Builder
+	visible := 0
+	escapeState := 0
+	for _, r := range value {
+		if escapeState != 0 {
+			builder.WriteRune(r)
+			if escapeState == 1 && r == '[' {
+				escapeState = 2
+			} else if escapeState == 1 || (escapeState == 2 && r >= '@' && r <= '~') {
+				escapeState = 0
+			}
+			continue
+		}
+		if r == '\033' {
+			builder.WriteRune(r)
+			escapeState = 1
+			continue
+		}
+		if visible >= target {
+			break
+		}
+		builder.WriteRune(r)
+		visible++
+	}
+	if supportsColor() {
+		builder.WriteString(colorReset)
+	}
+	if width > 1 {
+		builder.WriteRune('…')
+	}
+	return builder.String()
+}
+
 func formatOptionDetail(value string, selected bool) string {
 	trimmed := strings.TrimSpace(value)
 	lower := strings.ToLower(trimmed)
@@ -579,6 +994,8 @@ func formatPageLine(line string) string {
 	switch {
 	case isSectionTitle(trimmed):
 		return colorize(trimmed, colorAccent, colorBold)
+	case trimmed == resultEntryDivider:
+		return colorize(trimmed, colorAccent, colorBold)
 	case strings.HasPrefix(trimmed, "[OK]"):
 		return colorize("[OK]", colorGreen, colorBold) + strings.TrimPrefix(trimmed, "[OK]")
 	case strings.HasPrefix(trimmed, "[ERR]"):
@@ -610,7 +1027,7 @@ func formatPageLine(line string) string {
 
 func isSectionTitle(value string) bool {
 	switch value {
-	case "Summary", "Details", "Server", "Players", "Performance", "Debug", "Skipped", "Results", "Matches", "Update", "Links":
+	case "Summary", "Details", "Server", "World", "Players", "Network", "Identity", "Security", "Modding", "Performance", "Debug", "Skipped", "Results", "Matches", "Update", "Links":
 		return true
 	default:
 		return strings.HasPrefix(value, "Match ")
@@ -755,7 +1172,7 @@ func withSpinner(title string, message func(frame int) string, tick time.Duratio
 		}{result: result, err: err}
 	}()
 
-	frames := []string{"|", "/", "-", "\\"}
+	frames := []string{"◐", "◓", "◑", "◒"}
 	ticker := time.NewTicker(tick)
 	defer ticker.Stop()
 
@@ -857,7 +1274,7 @@ func withControlledSpinner(title string, message func(frame int, control *spinne
 	signal.Notify(signals, os.Interrupt)
 	defer signal.Stop(signals)
 
-	frames := []string{"|", "/", "-", "\\"}
+	frames := []string{"◐", "◓", "◑", "◒"}
 	ticker := time.NewTicker(tick)
 	defer ticker.Stop()
 
@@ -897,7 +1314,12 @@ func renderLiveFrame(title string, parts []string, frame string, spin bool) int 
 	if len(parts) == 0 {
 		parts = []string{""}
 	}
-	body := make([]string, 0, len(parts))
+	body := make([]string, 0, len(parts)+2)
+	liveColor := colorGreen
+	if !spin {
+		liveColor = colorWarn
+	}
+	body = append(body, colorize("● LIVE OPERATION", liveColor, colorBold), "")
 	for i, part := range parts {
 		line := formatLiveLine(fitLiveLine(part))
 		if i == len(parts)-1 && spin {
@@ -905,7 +1327,7 @@ func renderLiveFrame(title string, parts []string, frame string, spin bool) int 
 		}
 		body = append(body, line)
 	}
-	return renderFrame(title, body)
+	return renderFrame(title+" / live", body)
 }
 
 func pollSpinnerControls(fd int, control *spinnerControl) {
@@ -998,7 +1420,7 @@ func renderProgressBar(completed, total, frame, width int) string {
 	}
 	width = clampInt(width, 8, maxInt(8, terminalWidth()-24))
 	if total <= 0 {
-		return fmt.Sprintf("[%s]", style(strings.Repeat("-", width), colorDim))
+		return style("╺", colorDim) + style(strings.Repeat("─", width), colorDim) + style("╸", colorDim)
 	}
 	if completed < 0 {
 		completed = 0
@@ -1012,18 +1434,18 @@ func renderProgressBar(completed, total, frame, width int) string {
 	}
 	empty := width - filled
 	var builder strings.Builder
-	builder.WriteString(style("[", colorDim))
+	builder.WriteString(style("╺", colorDim))
 	if filled > 0 {
-		builder.WriteString(style(strings.Repeat("#", filled), colorGreen))
+		builder.WriteString(style(strings.Repeat("━", filled), colorGreen))
 	}
 	if completed < total && empty > 0 {
-		animation := []string{"|", "/", "-", "\\"}
+		animation := []string{"◆", "◇"}
 		builder.WriteString(style(animation[frame%len(animation)], colorAccent))
 		empty--
 	}
 	if empty > 0 {
-		builder.WriteString(style(strings.Repeat("-", empty), colorDim))
+		builder.WriteString(style(strings.Repeat("─", empty), colorDim))
 	}
-	builder.WriteString(style("]", colorDim))
+	builder.WriteString(style("╸", colorDim))
 	return builder.String()
 }

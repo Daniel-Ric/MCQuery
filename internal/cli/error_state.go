@@ -44,8 +44,7 @@ func (a *App) reportError(title string, err error) bool {
 }
 
 func (a *App) showErrorPage(title string, err error) error {
-	renderTextPage(title, formatErrorPage(err))
-	return waitForEnter()
+	return renderTextPageAndWait(title, formatErrorPage(err))
 }
 
 func formatErrorPage(err error) string {
