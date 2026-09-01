@@ -1,0 +1,5 @@
+# Local build output
+/dist/
+/MCQuery.exe
+/MCQuery-arm64.exe
+/mcquery
