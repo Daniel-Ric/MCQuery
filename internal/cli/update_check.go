@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -11,18 +12,30 @@ import (
 )
 
 const (
-	appVersion        = "0.2.0"
 	updateReleaseURL  = "https://api.github.com/repos/Daniel-Ric/MCQuery/releases/latest"
 	updateTagsURL     = "https://api.github.com/repos/Daniel-Ric/MCQuery/tags"
+	updateRepoURL     = "https://github.com/Daniel-Ric/MCQuery"
 	updateRequestTime = 5 * time.Second
 )
 
+// appVersion is a variable so release builds can stamp the tag version into
+// the executable with Go's -ldflags -X option.
+var appVersion = "0.2.0"
+
+// Version returns the version embedded in this build.
+func Version() string {
+	return appVersion
+}
+
+var errNoPublishedVersion = errors.New("no published version")
+
 type updateInfo struct {
-	CurrentVersion  string
-	LatestVersion   string
-	LatestURL       string
-	Source          string
-	UpdateAvailable bool
+	CurrentVersion   string
+	LatestVersion    string
+	LatestURL        string
+	Source           string
+	UpdateAvailable  bool
+	VersionPublished bool
 }
 
 func (a *App) executeUpdateCheck() error {
@@ -60,24 +73,34 @@ func (a *App) showStartupUpdateNotice() error {
 	if err != nil || strings.TrimSpace(resultText) == "" {
 		return err
 	}
-	renderTextPage("Update available", resultText)
-	return waitForEnter()
+
+	return renderTextPageAndWait("Update available", resultText)
 }
 
 func checkForUpdates(ctx context.Context) (updateInfo, error) {
-	latest, url, source, err := fetchLatestRelease(ctx)
-	if err != nil {
-		latest, url, source, err = fetchLatestTag(ctx)
-		if err != nil {
-			return updateInfo{}, err
+	latest, url, source, releaseErr := fetchLatestRelease(ctx)
+	if releaseErr != nil {
+		var tagErr error
+		latest, url, source, tagErr = fetchLatestTag(ctx)
+		if tagErr != nil {
+			if errors.Is(releaseErr, errNoPublishedVersion) && errors.Is(tagErr, errNoPublishedVersion) {
+				return updateInfo{
+					CurrentVersion:   appVersion,
+					LatestURL:        updateRepoURL,
+					Source:           "repository",
+					VersionPublished: false,
+				}, nil
+			}
+			return updateInfo{}, errors.Join(releaseErr, tagErr)
 		}
 	}
 	return updateInfo{
-		CurrentVersion:  appVersion,
-		LatestVersion:   latest,
-		LatestURL:       url,
-		Source:          source,
-		UpdateAvailable: compareVersions(latest, appVersion) > 0,
+		CurrentVersion:   appVersion,
+		LatestVersion:    latest,
+		LatestURL:        url,
+		Source:           source,
+		UpdateAvailable:  compareVersions(latest, appVersion) > 0,
+		VersionPublished: true,
 	}, nil
 }
 
@@ -91,6 +114,9 @@ func fetchLatestRelease(ctx context.Context) (string, string, string, error) {
 		return "", "", "", err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return "", "", "", errNoPublishedVersion
+	}
 	if resp.StatusCode != http.StatusOK {
 		return "", "", "", fmt.Errorf("release response: %s", resp.Status)
 	}
@@ -130,7 +156,7 @@ func fetchLatestTag(ctx context.Context) (string, string, string, error) {
 		return "", "", "", err
 	}
 	if len(payload) == 0 || strings.TrimSpace(payload[0].Name) == "" {
-		return "", "", "", fmt.Errorf("no tags found")
+		return "", "", "", errNoPublishedVersion
 	}
 	return cleanVersion(payload[0].Name), payload[0].URL, "tag", nil
 }
@@ -139,6 +165,16 @@ func formatUpdateInfo(info updateInfo) string {
 	var builder strings.Builder
 	builder.WriteString("Update\n")
 	builder.WriteString(fmt.Sprintf("Current version: %s\n", info.CurrentVersion))
+	if !info.VersionPublished {
+		builder.WriteString("Published version: none\n")
+		builder.WriteString("Source: GitHub repository\n")
+		if info.LatestURL != "" {
+			builder.WriteString(fmt.Sprintf("URL: %s\n", info.LatestURL))
+		}
+		builder.WriteString("Status: no release or version tag has been published yet\n")
+		builder.WriteString("Hint: publish a GitHub release or version tag to enable version comparisons")
+		return builder.String()
+	}
 	builder.WriteString(fmt.Sprintf("Latest version: %s\n", info.LatestVersion))
 	builder.WriteString(fmt.Sprintf("Source: %s\n", info.Source))
 	if info.LatestURL != "" {

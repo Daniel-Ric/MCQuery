@@ -14,12 +14,17 @@ import (
 )
 
 func main() {
+	showVersion := flag.Bool("version", false, "print the MCQuery version and exit")
 	apiMode := flag.Bool("api", false, "start status API server")
 	apiConfig := flag.String("api-config", "", "status API config file")
 	apiAddr := flag.String("api-addr", "127.0.0.1:8080", "status API address")
 	apiTimeoutMS := flag.Int("api-timeout-ms", 1000, "status API request timeout in milliseconds")
 	apiConcurrency := flag.Int("api-concurrency", 32, "status API query concurrency")
 	flag.Parse()
+	if *showVersion {
+		fmt.Fprintf(os.Stdout, "MCQuery %s\n", cli.Version())
+		return
+	}
 
 	if *apiMode || strings.TrimSpace(*apiConfig) != "" {
 		config := web.StatusAPIConfig{

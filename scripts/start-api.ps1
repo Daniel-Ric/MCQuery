@@ -4,10 +4,13 @@ $Config = Join-Path $Root "config\api.local.json"
 if (-not (Test-Path -LiteralPath $Config)) {
     $Config = Join-Path $Root "config\api.example.json"
 }
-$Exe = Join-Path $Root "uwp-tcp-con.exe"
+$Exe = Join-Path $Root "MCQuery.exe"
+$LegacyExe = Join-Path $Root "uwp-tcp-con.exe"
 $BareExe = Join-Path $Root "uwp-tcp-con"
 if (Test-Path -LiteralPath $Exe) {
     & $Exe --api --api-config $Config
+} elseif (Test-Path -LiteralPath $LegacyExe) {
+    & $LegacyExe --api --api-config $Config
 } elseif (Test-Path -LiteralPath $BareExe) {
     & $BareExe --api --api-config $Config
 } else {
