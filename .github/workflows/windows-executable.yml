@@ -97,7 +97,7 @@ jobs:
 
     steps:
       - name: Download Windows executables
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: MCQuery-windows-*
           path: dist
